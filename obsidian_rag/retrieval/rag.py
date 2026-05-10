@@ -472,4 +472,4 @@ def build_rag_context(
 
 def should_use_rag(model: str) -> bool:
     """Check if model has RAG enabled in config."""
-    return settings.models.get(model, False)
+    return bool(settings.models.get(model, False))

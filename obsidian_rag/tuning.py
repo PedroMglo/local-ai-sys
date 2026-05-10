@@ -7,6 +7,7 @@ quando ``[performance] auto_tune = true`` (default).
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -47,7 +48,7 @@ def detect_resources(data_dir: str | None = None) -> ResourceInfo:
         cpu_pct = 0.0
 
     # Disk free on data_dir partition (fallback to home)
-    disk_path = data_dir or str(shutil.os.path.expanduser("~"))
+    disk_path = data_dir or os.path.expanduser("~")
     try:
         disk = shutil.disk_usage(disk_path)
         disk_free = disk.free / (1024 ** 3)
