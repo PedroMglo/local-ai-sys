@@ -9,9 +9,6 @@ updates:
       time: "06:00"
       timezone: "Europe/Lisbon"
     open-pull-requests-limit: 10
-    labels:
-      - "dependencies"
-      - "python"
     groups:
       # Bump all FastAPI-related packages together
       fastapi:
@@ -43,6 +40,3 @@ updates:
       time: "06:00"
       timezone: "Europe/Lisbon"
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "github-actions"
