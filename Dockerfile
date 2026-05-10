@@ -1,6 +1,10 @@
 # --- Build stage ---
 FROM python:3.11-slim AS builder
 
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY pyproject.toml requirements.txt ./
 COPY obsidian_rag/ obsidian_rag/
@@ -11,8 +15,11 @@ RUN pip install --no-cache-dir --upgrade pip \
 # --- Runtime stage ---
 FROM python:3.11-slim
 
-# Utilizador não-root para segurança
-RUN groupadd --gid 1000 rag \
+# Patch OS-level vulnerabilities and create non-root user
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1000 rag \
     && useradd --uid 1000 --gid rag --create-home rag
 
 WORKDIR /app
