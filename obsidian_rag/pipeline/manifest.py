@@ -199,7 +199,7 @@ class IngestManifest:
         with self._tx() as cur:
             placeholders = ",".join("?" for _ in chunk_ids)
             cur.execute(
-                f"UPDATE chunks SET vector_status = 'embedded' WHERE chunk_id IN ({placeholders})",  # noqa: S608
+                f"UPDATE chunks SET vector_status = 'embedded' WHERE chunk_id IN ({placeholders})",  # noqa: S608  # nosec B608
                 chunk_ids,
             )
 
@@ -237,7 +237,7 @@ class IngestManifest:
         with self._tx() as cur:
             placeholders = ",".join("?" for _ in chunk_ids)
             cur.execute(
-                f"DELETE FROM chunks WHERE chunk_id IN ({placeholders})",  # noqa: S608
+                f"DELETE FROM chunks WHERE chunk_id IN ({placeholders})",  # noqa: S608  # nosec B608
                 chunk_ids,
             )
 

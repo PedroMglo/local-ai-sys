@@ -15,7 +15,7 @@ from obsidian_rag.retrieval.budget import allocate_budget, truncate_chunks, trun
 from obsidian_rag.retrieval.intent import detect_intent_full
 from obsidian_rag.retrieval.observe import QueryTrace
 from obsidian_rag.retrieval.router import _GRAPH_PATTERNS, _GRAPH_SIGNALS, ContextMode
-from obsidian_rag.store.chroma import get_client, get_collection
+from obsidian_rag.store.base import VectorStore, create_store
 
 log = logging.getLogger("obsidian_rag")
 
@@ -47,55 +47,32 @@ _NAVIGATION_SECTIONS = frozenset({
 })
 
 
-# === Collection singletons ===
+# === VectorStore singleton ===
 _lock = threading.Lock()
-_chroma_client = None
-_chroma_collection = None
-_code_collection = None
+_store: VectorStore | None = None
 
 
-def _get_collection(*, _override=None):
-    """Lazy singleton for the obsidian_vault collection.
+def _get_store(*, _override: VectorStore | None = None) -> VectorStore:
+    """Lazy singleton for the configured vector store.
 
     Args:
-        _override: inject a collection for testing (bypasses singleton).
+        _override: inject a store for testing (bypasses singleton).
     """
-    global _chroma_client, _chroma_collection
+    global _store
     if _override is not None:
         return _override
-    if _chroma_collection is None:
+    if _store is None:
         with _lock:
-            if _chroma_collection is None:
-                _chroma_client = get_client()
-                _chroma_collection = get_collection(_chroma_client, name="obsidian_vault")
-    return _chroma_collection
-
-
-def _get_code_collection(*, _override=None):
-    """Lazy singleton for the code_repos collection.
-
-    Args:
-        _override: inject a collection for testing (bypasses singleton).
-    """
-    global _chroma_client, _code_collection
-    if _override is not None:
-        return _override
-    if _code_collection is None:
-        with _lock:
-            if _code_collection is None:
-                if _chroma_client is None:
-                    _chroma_client = get_client()
-                _code_collection = get_collection(_chroma_client, name=settings.repos.collection_name)
-    return _code_collection
+            if _store is None:
+                _store = create_store()
+    return _store
 
 
 def _reset_collections():
     """Reset singletons — for testing only."""
-    global _chroma_client, _chroma_collection, _code_collection
+    global _store
     with _lock:
-        _chroma_client = None
-        _chroma_collection = None
-        _code_collection = None
+        _store = None
 
 
 # === Helpers ===
@@ -140,24 +117,11 @@ def _estimate_complexity(query: str) -> str:
     return "normal"
 
 
-def _search_chroma(collection, query_text: str, n: int) -> list[tuple[str, dict, float]]:
-    """Single ChromaDB vector search."""
+def _search_chroma(store: VectorStore, query_text: str, n: int, *, collection: str = "obsidian_vault") -> list[tuple[str, dict, float]]:
+    """Vector search via the VectorStore protocol."""
     embedding = get_query_embedding(query_text)
-    results = collection.query(
-        query_embeddings=[embedding],
-        n_results=min(n * 3, 50),
-        include=["documents", "metadatas", "distances"],
-    )
-    if not results["ids"] or not results["ids"][0]:
-        return []
-    return [
-        (doc, meta, 1.0 - dist)
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        )
-    ]
+    results = store.query(embedding, n=min(n * 3, 50), collection=collection)
+    return [(r.document, r.metadata, r.score) for r in results]
 
 
 def _deduplicate(chunks: list[tuple[str, dict, float]]) -> list[tuple[str, dict, float]]:
@@ -282,17 +246,17 @@ def build_rag_context(
     # Strategies 1-2: Notas Obsidian (vector search + keyword variant)
     if intent.use_notes:
         try:
-            collection = _get_collection()
+            store = _get_store()
 
             # 1. Primary search
-            primary = _search_chroma(collection, query, effective_k)
+            primary = _search_chroma(store, query, effective_k, collection="obsidian_vault")
             trace.notes_retrieved += len(primary)
 
             # 2. Keyword variant
             keywords = _extract_keywords(query)
             secondary = []
             if keywords != query.lower().strip() and len(keywords) > 3:
-                secondary = _search_chroma(collection, keywords, effective_k)
+                secondary = _search_chroma(store, keywords, effective_k, collection="obsidian_vault")
                 trace.notes_retrieved += len(secondary)
 
             # Deduplicate + filter navigation + threshold
@@ -319,14 +283,15 @@ def build_rag_context(
     # Strategy 3: Code repo search
     if intent.use_code and settings.repos.paths:
         try:
-            code_coll = _get_code_collection()
-            code_results = _search_chroma(code_coll, query, effective_k)
+            store = _get_store()
+            code_col_name = settings.repos.collection_name
+            code_results = _search_chroma(store, query, effective_k, collection=code_col_name)
             trace.code_retrieved += len(code_results)
 
             # Keyword variant para código
             keywords = _extract_keywords(query)
             if keywords != query.lower().strip() and len(keywords) > 3:
-                code_kw = _search_chroma(code_coll, keywords, effective_k)
+                code_kw = _search_chroma(store, keywords, effective_k, collection=code_col_name)
                 code_results = code_results + code_kw
                 trace.code_retrieved += len(code_kw)
 

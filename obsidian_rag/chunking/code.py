@@ -26,6 +26,19 @@ _REPO_DOC_EXTENSIONS = {".md", ".mdx", ".txt", ".rst", ".yaml", ".yml", ".toml",
 # Extensões de código Python
 _PYTHON_EXTENSION = ".py"
 
+# Extensões que tree-sitter pode tratar (se instalado)
+_TREESITTER_EXTENSIONS: dict[str, str] = {
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript",
+    ".ts": "typescript", ".tsx": "tsx",
+    ".java": "java",
+    ".go": "go",
+    ".rs": "rust",
+    ".c": "c", ".h": "c",
+    ".cpp": "cpp", ".cxx": "cpp", ".cc": "cpp", ".hpp": "cpp", ".hxx": "cpp",
+    ".cs": "c_sharp",
+    ".rb": "ruby",
+}
+
 
 def _compute_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
@@ -290,7 +303,8 @@ def chunk_file(path: Path, repo_dir: Path, cfg) -> list[Chunk]:
     """Processa um único ficheiro do repo → lista de Chunks.
 
     - .py  → chunking AST (funções, classes, módulo)
-    - resto → chunk_note() do chunker Markdown com source_type="repo_doc"
+    - JS/TS/Java/Go/Rust/C/C++/C#/Ruby → tree-sitter (se instalado)
+    - .md/.yaml/.toml/.sh etc. → chunk_note() do chunker Markdown
     """
     repo_name = repo_dir.name
     suffix = path.suffix.lower()
@@ -306,6 +320,20 @@ def chunk_file(path: Path, repo_dir: Path, cfg) -> list[Chunk]:
     if suffix == _PYTHON_EXTENSION:
         rel_path = str(path.relative_to(repo_dir))
         return _chunk_python_source(source, rel_path, repo_name, cfg)
+
+    # Tree-sitter languages
+    lang_key = _TREESITTER_EXTENSIONS.get(suffix)
+    if lang_key is not None:
+        rel_path = str(path.relative_to(repo_dir))
+        try:
+            from obsidian_rag.chunking.treesitter import chunk_treesitter, is_available
+            if is_available():
+                return chunk_treesitter(source, rel_path, repo_name, lang_key, cfg)
+        except ImportError:
+            pass
+        # Fallback to text chunking if tree-sitter not installed
+        note_title = Path(rel_path).name
+        return _chunk_text_fallback(source, rel_path, repo_name, note_title, cfg)
 
     if suffix in _REPO_DOC_EXTENSIONS:
         # Reutiliza o chunker Markdown com metadata enriquecida
@@ -383,7 +411,7 @@ def iter_repo_files(repo_dir: Path | str) -> Iterator[Path]:
     Used by the bounded ingest pipeline to process files one at a time.
     """
     repo_dir = Path(repo_dir).expanduser().resolve()
-    valid_extensions = {_PYTHON_EXTENSION} | _REPO_DOC_EXTENSIONS
+    valid_extensions = {_PYTHON_EXTENSION} | _REPO_DOC_EXTENSIONS | set(_TREESITTER_EXTENSIONS.keys())
 
     for path in sorted(repo_dir.rglob("*")):
         if not path.is_file():

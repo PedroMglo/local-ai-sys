@@ -4,7 +4,7 @@
 
 [paths]
 source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
-data_dir = "data/chroma"        # relativo à raiz do projeto
+data_dir = "data/qdrant"        # relativo à raiz do projeto
 vault_dir = "~/Obsidian/Vault"  # fonte principal — expandido em runtime
 
 # =============================================================================
@@ -121,6 +121,13 @@ log_format = "text"
 [pipeline]
 # Número máximo de workers para sync paralelo de repos (1 = sequencial)
 max_workers = 4
+# Motor de execução do pipeline:
+#   local — ProcessPoolExecutor (default, sem dependências extras)
+#   dask  — Dask distributed (requer: pip install obsidian-rag[dask])
+engine = "local"
+# Endereço do Dask scheduler (vazio = cria cluster local temporário)
+# Exemplo: "tcp://192.168.1.10:8786"
+dask_scheduler = ""
 
 # =============================================================================
 # PERFORMANCE — auto-tuning e limites de recursos
@@ -161,13 +168,27 @@ pause_memory_percent = 75
 abort_memory_percent = 85
 
 # =============================================================================
-# REPOSITÓRIOS GIT — indexação de código no ChromaDB
+# VECTOR STORE — backend de armazenamento vectorial
+# Backends disponíveis:
+#   chroma — ChromaDB PersistentClient (default, sem server externo)
+#   qdrant — Qdrant (embedded sem server, ou server via qdrant_url)
+# RAG_STORE_* env vars sobrepõem estes valores
+# =============================================================================
+[store]
+backend = "qdrant"
+# URL do servidor Qdrant (vazio = modo embedded local). Exemplo: "http://localhost:6333"
+qdrant_url = ""
+# API key para Qdrant Cloud (vazio = sem autenticação)
+qdrant_api_key = ""
+
+# =============================================================================
+# REPOSITÓRIOS GIT — indexação de código no Qdrant
 # RAG_REPOS_* env vars sobrepõem estes valores
 # =============================================================================
 [repos]
 # Lista de paths absolutos (ou ~) para repos git a indexar
 paths = ["~/ai-local/SPEECH-LAB", "~/Projects/ApacheSpark-CD", "~/ai-local/obsidian-rag","~/Projects/Git_Concepts","~/Projects/Python_Stud"]
-# Coleção ChromaDB separada para código (não mistura com notas Obsidian)
+# Coleção Qdrant separada para código (não mistura com notas Obsidian)
 collection_name = "code_repos"
 
 [repos.chunking]

@@ -174,8 +174,17 @@ _DEFAULT_EXCLUDE_PATTERNS = (
 
 
 @dataclass(frozen=True)
+class StoreConfig:
+    backend: str             # "chroma" | "qdrant"
+    qdrant_url: str          # Qdrant server URL (empty = embedded mode)
+    qdrant_api_key: str      # Qdrant Cloud API key (empty = none)
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     max_workers: int        # max parallel workers for repo sync
+    engine: str = "local"   # "local" (ProcessPoolExecutor) | "dask" (Dask distributed)
+    dask_scheduler: str = ""  # Dask scheduler address (empty = local cluster)
 
 
 @dataclass(frozen=True)
@@ -210,6 +219,7 @@ class Settings:
     reranker: RerankerConfig
     context_policy: ContextPolicyConfig
     debug: DebugConfig
+    store: StoreConfig
     pipeline: PipelineConfig
     performance: PerformanceConfig
     sync: SyncConfig
@@ -325,9 +335,18 @@ def load_settings() -> Settings:
         log_format=_env_override("debug", "log_format", db.get("log_format", "text")),
     )
 
+    st = raw.get("store", {})
+    store = StoreConfig(
+        backend=_env_override("store", "backend", st.get("backend", "chroma")),
+        qdrant_url=_env_override("store", "qdrant_url", st.get("qdrant_url", "")),
+        qdrant_api_key=_env_override("store", "qdrant_api_key", st.get("qdrant_api_key", "")),
+    )
+
     pl = raw.get("pipeline", {})
     pipeline = PipelineConfig(
         max_workers=_env_override("pipeline", "max_workers", pl.get("max_workers", 4)),
+        engine=_env_override("pipeline", "engine", pl.get("engine", "local")),
+        dask_scheduler=_env_override("pipeline", "dask_scheduler", pl.get("dask_scheduler", "")),
     )
 
     # Sync — optional section, defaults to backend="direct" (cross-platform)
@@ -382,6 +401,7 @@ def load_settings() -> Settings:
         reranker=reranker,
         context_policy=context_policy,
         debug=debug,
+        store=store,
         pipeline=pipeline,
         performance=performance,
         sync=sync,

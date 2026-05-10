@@ -25,18 +25,103 @@ from obsidian_rag.embeddings.ollama import clear_embed_cache
 from obsidian_rag.pipeline.ingest import IngestPipeline, IngestSource
 from obsidian_rag.pipeline.manifest import IngestManifest
 from obsidian_rag.pipeline.vault_sync import sync_vault
-from obsidian_rag.store.chroma import get_client, get_collection, sync_repo_to_chroma, sync_to_chroma
+from obsidian_rag.store.base import VectorStore, create_store
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _sync_chunks_to_store(
+    chunks: list,
+    *,
+    collection: str = "obsidian_vault",
+    verbose: bool = True,
+) -> None:
+    """Incremental sync: embed new chunks, delete stale, upsert via VectorStore."""
+    import time
+    from obsidian_rag.embeddings.ollama import embed_texts
+    from obsidian_rag.tuning import should_throttle
+
+    store = create_store()
+    existing_ids = store.get_existing_ids(collection=collection)
+    new_chunk_ids = {c.id for c in chunks}
+
+    # Remove stale chunks
+    stale_ids = existing_ids - new_chunk_ids
+    if stale_ids:
+        store.delete_ids(list(stale_ids), collection=collection)
+        if verbose:
+            print(f"  Removidos {len(stale_ids)} chunks obsoletos")
+
+    # Filter to only new chunks
+    chunks_to_add = [c for c in chunks if c.id not in existing_ids]
+    if not chunks_to_add:
+        if verbose:
+            print("  Nenhum chunk novo para processar.")
+        return
+
+    if verbose:
+        print(f"  A processar {len(chunks_to_add)} chunks novos...")
+
+    total = len(chunks_to_add)
+    processed = 0
+    start_time = time.time()
+    batch_size = settings.performance.embedding_batch_size
+    data_dir = str(settings.paths.data_dir)
+
+    i = 0
+    while i < total:
+        if i > 0:
+            advice = should_throttle(settings.performance, data_dir)
+            if advice.low_disk:
+                print(f"\n  ✗ Disco quase cheio — sync abortado após {processed}/{total} chunks.")
+                return
+            if advice.pause_sync:
+                for attempt in range(1, 4):
+                    print(f"\n  ⚠ Sistema sob pressão: {advice.reason} — pausa {attempt}/3...")
+                    time.sleep(5)
+                    advice = should_throttle(settings.performance, data_dir)
+                    if not advice.pause_sync:
+                        break
+                else:
+                    batch_size = max(5, batch_size // 2)
+                    print(f"  Pressão mantém-se — batch reduzido para {batch_size}")
+            elif advice.reduce_workers:
+                batch_size = max(5, batch_size // 2)
+                if verbose:
+                    print(f"\n  ⚠ Batch reduzido para {batch_size}: {advice.reason}")
+
+        batch = chunks_to_add[i : i + batch_size]
+        texts = [c.text for c in batch]
+        ids = [c.id for c in batch]
+        metadatas = [c.metadata for c in batch]
+
+        embeddings = embed_texts(texts)
+        store.upsert_batch(ids, embeddings, texts, metadatas, collection=collection)
+
+        processed += len(batch)
+        i += len(batch)
+        if verbose:
+            elapsed = time.time() - start_time
+            rate = processed / elapsed if elapsed > 0 else 0
+            print(f"    [{processed}/{total}] {rate:.1f} chunks/s", end="\r")
+
+    if verbose:
+        elapsed = time.time() - start_time
+        print(f"\n  Concluído em {elapsed:.1f}s ({total} chunks)")
+
 
 # ---------------------------------------------------------------------------
 # Sync functions
 # ---------------------------------------------------------------------------
 
 def sync_notes() -> None:
-    """Sincroniza notas Obsidian → ChromaDB (coleção obsidian_vault).
+    """Sincroniza notas Obsidian → vector store (coleção obsidian_vault).
 
     1. Sync vault → source (or read vault directly, depending on backend)
     2. Chunk all .md files
-    3. Embed and store in ChromaDB
+    3. Embed and store via VectorStore protocol
     """
     from obsidian_rag.pipeline.governor import GovernorAction, ResourceGovernor
 
@@ -75,21 +160,21 @@ def sync_notes() -> None:
     chunks = chunk_all_notes(source_dir=effective_dir)
     print(f"    Total de chunks: {len(chunks)}")
 
-    print("==> [Notas] A sincronizar com ChromaDB (obsidian_vault)...")
-    sync_to_chroma(chunks)
+    print("==> [Notas] A sincronizar com vector store (obsidian_vault)...")
+    _sync_chunks_to_store(chunks, collection="obsidian_vault")
 
-    client = get_client()
-    collection = get_collection(client, name="obsidian_vault")
-    print(f"==> [Notas] ChromaDB: {collection.count()} chunks na coleção 'obsidian_vault'")
+    store = create_store()
+    count = store.count(collection="obsidian_vault")
+    print(f"==> [Notas] Store: {count} chunks na coleção 'obsidian_vault'")
 
 
 def sync_repos() -> None:
-    """Sincroniza repos git → ChromaDB (coleção code_repos).
+    """Sincroniza repos git → vector store (coleção code_repos).
 
     Uses the bounded ingest pipeline: files are parsed in parallel via
     ProcessPoolExecutor, embedded in micro-batches by a single embedder,
-    and written to ChromaDB by a single writer. Bounded queues between
-    every stage prevent unbounded memory growth.
+    and written to the vector store by a single writer. Bounded queues
+    between every stage prevent unbounded memory growth.
 
     Falls back to sequential processing if the pipeline fails to initialize.
     """
@@ -138,8 +223,7 @@ def sync_repos() -> None:
     manifest_path = settings.paths.data_dir / "manifest.db"
     manifest = IngestManifest(manifest_path)
 
-    client = get_client()
-    collection = get_collection(client, name=settings.repos.collection_name)
+    store = create_store()
 
     sources = [
         IngestSource(source_type="code", path=p, name=p.name)
@@ -149,8 +233,10 @@ def sync_repos() -> None:
     pipeline = IngestPipeline(
         manifest=manifest,
         perf=settings.performance,
-        collection=collection,
+        store=store,
+        collection_name=settings.repos.collection_name,
         governor=gov,    # pass the already-running governor
+        pipeline_config=settings.pipeline,
     )
 
     try:
@@ -172,8 +258,8 @@ def sync_repos() -> None:
         if len(result.errors) > 5:
             print(f"      ... e mais {len(result.errors) - 5}")
 
-    final_count = collection.count()
-    print(f"==> [Repos] ChromaDB: {final_count} chunks na coleção '{settings.repos.collection_name}'")
+    final_count = store.count(collection=settings.repos.collection_name)
+    print(f"==> [Repos] Store: {final_count} chunks na coleção '{settings.repos.collection_name}'")
 
 
 def _wait_for_resources(label: str) -> bool:

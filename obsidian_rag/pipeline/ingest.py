@@ -17,9 +17,7 @@ import gc
 import logging
 import threading
 import time
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from multiprocessing import get_context
 from pathlib import Path
 from queue import Empty, Full, Queue
 from typing import NamedTuple
@@ -100,18 +98,22 @@ class IngestPipeline:
         self,
         manifest,  # IngestManifest
         perf,      # PerformanceConfig
-        collection,  # ChromaDB collection (or VectorStore in future)
+        store,     # VectorStore (backend-agnostic)
         *,
+        collection_name: str = "code_repos",
         embed_fn=None,  # optional: callable(list[str]) -> list[list[float]] for testing
         governor=None,  # optional: ResourceGovernor (created automatically if None)
+        pipeline_config=None,  # optional: PipelineConfig (engine, dask_scheduler)
     ) -> None:
         from obsidian_rag.pipeline.manifest import IngestManifest
         self._manifest: IngestManifest = manifest
         self._perf = perf
-        self._collection = collection
+        self._store = store
+        self._collection_name = collection_name
         self._embed_fn = embed_fn
         self._governor = governor       # set in run() if None
         self._owns_governor = False      # True when we created the governor
+        self._pipeline_config = pipeline_config
 
         # Queues with bounded sizes for backpressure
         self._files_queue: Queue = Queue(maxsize=perf.files_queue_max)
@@ -265,10 +267,18 @@ class IngestPipeline:
 
     def _parser_stage(self) -> None:
         """Consume FileJobs from files_queue, parse in parallel, feed chunks_queue."""
-        executor = ProcessPoolExecutor(
-            max_workers=self._perf.parser_workers,
-            mp_context=get_context("spawn"),
-            max_tasks_per_child=100,
+        from obsidian_rag.pipeline.dask_engine import create_parser_pool
+
+        engine = "local"
+        scheduler = ""
+        if self._pipeline_config is not None:
+            engine = self._pipeline_config.engine
+            scheduler = self._pipeline_config.dask_scheduler
+
+        executor = create_parser_pool(
+            engine=engine,
+            n_workers=self._perf.parser_workers,
+            scheduler_address=scheduler,
         )
 
         try:
@@ -498,11 +508,12 @@ class IngestPipeline:
                     texts = [c.text for c in batch.chunks]
                     metadatas = [c.metadata for c in batch.chunks]
 
-                    self._collection.add(
+                    self._store.upsert_batch(
                         ids=ids,
                         embeddings=batch.embeddings,
                         documents=texts,
                         metadatas=metadatas,
+                        collection=self._collection_name,
                     )
 
                     # Mark as embedded in manifest
@@ -531,8 +542,7 @@ class IngestPipeline:
             return
 
         # Get existing IDs in the vector store
-        from obsidian_rag.store.chroma import get_existing_ids
-        existing_in_store = get_existing_ids(self._collection)
+        existing_in_store = self._store.get_existing_ids(collection=self._collection_name)
 
         # Find IDs that are in the store but not in the manifest
         # (they were from files that no longer exist or changed)
@@ -540,16 +550,10 @@ class IngestPipeline:
         if not stale_in_store:
             return
 
-        # Delete in batches
-        stale_list = list(stale_in_store)
-        for i in range(0, len(stale_list), 500):
-            batch = stale_list[i : i + 500]
-            try:
-                self._collection.delete(ids=batch)
-            except Exception as e:
-                log.warning("Stale delete error: %s", e)
+        # Delete via VectorStore protocol
+        deleted = self._store.delete_ids(list(stale_in_store), collection=self._collection_name)
 
         with self._result_lock:
-            self._result.stale_deleted += len(stale_in_store)
+            self._result.stale_deleted += deleted
 
-        log.info("Deleted %d stale chunks from %s", len(stale_in_store), source.name)
+        log.info("Deleted %d stale chunks from %s", deleted, source.name)
