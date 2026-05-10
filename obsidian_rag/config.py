@@ -187,6 +187,7 @@ class PerformanceConfig:
     embedding_batch_size: int    # batch size for embedding calls
     embedding_timeout: int       # max seconds for embedding HTTP calls
     query_timeout_seconds: int   # max seconds for a single query
+    graph_timeout: int = 600     # max seconds for a single graphify subprocess
 
 
 @dataclass(frozen=True)
@@ -343,6 +344,7 @@ def load_settings() -> Settings:
         embedding_batch_size=_env_override("performance", "embedding_batch_size", pf.get("embedding_batch_size", 50)),
         embedding_timeout=_env_override("performance", "embedding_timeout", pf.get("embedding_timeout", 120)),
         query_timeout_seconds=_env_override("performance", "query_timeout_seconds", pf.get("query_timeout_seconds", 30)),
+        graph_timeout=_env_override("performance", "graph_timeout", pf.get("graph_timeout", 600)),
     )
 
     # Auto-tune: adjust limits based on detected hardware

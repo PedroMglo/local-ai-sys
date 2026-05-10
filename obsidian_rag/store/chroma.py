@@ -9,8 +9,6 @@ from obsidian_rag.chunking.markdown import Chunk
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import embed_texts
 
-BATCH_SIZE = 50
-
 
 def get_client() -> chromadb.ClientAPI:
     """Inicializa ChromaDB em modo persistente."""
@@ -51,6 +49,8 @@ def sync_to_chroma(chunks: list[Chunk], verbose: bool = True, _collection=None) 
         verbose: imprimir progresso
         _collection: coleção ChromaDB (interna; usa obsidian_vault por omissão)
     """
+    from obsidian_rag.tuning import should_throttle
+
     client = get_client()
     collection = _collection if _collection is not None else get_collection(client)
 
@@ -80,9 +80,32 @@ def sync_to_chroma(chunks: list[Chunk], verbose: bool = True, _collection=None) 
     total = len(chunks_to_add)
     processed = 0
     start_time = time.time()
+    batch_size = settings.performance.embedding_batch_size
+    data_dir = str(settings.paths.data_dir)
 
-    for i in range(0, total, BATCH_SIZE):
-        batch = chunks_to_add[i : i + BATCH_SIZE]
+    for i in range(0, total, batch_size):
+        # --- Resource protection between batches ---
+        if i > 0:
+            advice = should_throttle(settings.performance, data_dir)
+            if advice.low_disk:
+                print(f"\n  ✗ Disco quase cheio — sync abortado após {processed}/{total} chunks. {advice.reason}")
+                return
+            if advice.pause_sync:
+                for attempt in range(1, 4):
+                    print(f"\n  ⚠ Sistema sob pressão: {advice.reason} — pausa {attempt}/3...")
+                    time.sleep(5)
+                    advice = should_throttle(settings.performance, data_dir)
+                    if not advice.pause_sync:
+                        break
+                else:
+                    batch_size = max(5, batch_size // 2)
+                    print(f"  Pressão mantém-se — batch reduzido para {batch_size}")
+            elif advice.reduce_workers:
+                batch_size = max(5, batch_size // 2)
+                if verbose:
+                    print(f"\n  ⚠ Batch reduzido para {batch_size}: {advice.reason}")
+
+        batch = chunks_to_add[i : i + batch_size]
         texts = [c.text for c in batch]
         ids = [c.id for c in batch]
         metadatas = [c.metadata for c in batch]

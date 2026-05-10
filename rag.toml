@@ -144,6 +144,8 @@ embedding_batch_size = 50
 embedding_timeout = 120
 # Timeout máximo por query (segundos)
 query_timeout_seconds = 30
+# Timeout máximo por subprocess graphify (segundos) — 0 = sem limite
+graph_timeout = 600
 
 # =============================================================================
 # REPOSITÓRIOS GIT — indexação de código no ChromaDB
@@ -151,7 +153,7 @@ query_timeout_seconds = 30
 # =============================================================================
 [repos]
 # Lista de paths absolutos (ou ~) para repos git a indexar
-paths = ["~/ai-local/SPEECH-LAB", "~/Projects/ApacheSpark-CD", "~/ai-local/obsidian-rag"]
+paths = ["~/ai-local/SPEECH-LAB", "~/Projects/ApacheSpark-CD", "~/ai-local/obsidian-rag","~/Projects/Git_Concepts","~/Projects/Python_Stud"]
 # Coleção ChromaDB separada para código (não mistura com notas Obsidian)
 collection_name = "code_repos"
 

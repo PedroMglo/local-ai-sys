@@ -35,6 +35,25 @@ def sync_notes() -> None:
     2. Chunk all .md files
     3. Embed and store in ChromaDB
     """
+    from obsidian_rag.tuning import should_throttle
+
+    # --- Resource protection ---
+    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+    if advice.low_disk:
+        print(f"✗ [Notas] Disco quase cheio — sync abortado. {advice.reason}")
+        return
+    if advice.pause_sync:
+        import time as _time
+        print(f"⚠ [Notas] Sistema sob pressão: {advice.reason}")
+        for attempt in range(1, 4):
+            print(f"    Pausa {attempt}/3 — a aguardar 5s...")
+            _time.sleep(5)
+            advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+            if not advice.pause_sync:
+                break
+        else:
+            print("    Pressão mantém-se — a continuar com precaução.")
+
     clear_embed_cache()
 
     # Step 1: resolve effective notes directory via sync backend
@@ -85,6 +104,8 @@ def sync_repos() -> None:
         return
 
     # --- Resource protection ---
+    import time as _time
+
     from obsidian_rag.tuning import should_throttle
 
     advice = should_throttle(settings.performance, str(settings.paths.data_dir))
@@ -95,7 +116,6 @@ def sync_repos() -> None:
     max_workers = min(settings.pipeline.max_workers, len(valid_paths))
 
     if advice.pause_sync:
-        import time as _time
         print(f"⚠ [Repos] Sistema sob pressão: {advice.reason}")
         for attempt in range(1, 4):
             print(f"    Pausa {attempt}/3 — a aguardar 5s...")
@@ -115,6 +135,18 @@ def sync_repos() -> None:
     if max_workers <= 1:
         # Sequential fallback
         for repo_path in valid_paths:
+            # Throttle check before each repo
+            advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+            if advice.low_disk:
+                print(f"✗ [Repos] Disco quase cheio — sync abortado. {advice.reason}")
+                break
+            if advice.pause_sync:
+                print(f"⚠ [Repos] Pressão antes de {repo_path.name}: {advice.reason} — a aguardar...")
+                for attempt in range(1, 4):
+                    _time.sleep(5)
+                    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+                    if not advice.pause_sync:
+                        break
             print(f"==> [Repos] A processar repo: {repo_path.name} ({repo_path})")
             repo_chunks = chunk_repo(repo_path, cfg=settings.repos.chunking)
             print(f"    Chunks extraídos: {len(repo_chunks)}")
@@ -122,11 +154,35 @@ def sync_repos() -> None:
     else:
         print(f"==> [Repos] A processar {len(valid_paths)} repos em paralelo (max_workers={max_workers})...")
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_chunk_single_repo, p): p for p in valid_paths}
-            for future in as_completed(futures):
-                repo_path = futures[future]
+            # Submit repos one at a time with throttle checks between submissions
+            pending: dict = {}
+            remaining = list(valid_paths)
+
+            while remaining or pending:
+                # Submit next repo if under worker limit and resources allow
+                while remaining and len(pending) < max_workers:
+                    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+                    if advice.low_disk:
+                        print(f"\n✗ [Repos] Disco quase cheio — não submete mais repos. {advice.reason}")
+                        remaining.clear()
+                        break
+                    if advice.pause_sync and pending:
+                        # Already have work in progress — wait for some to finish first
+                        print(f"\n⚠ [Repos] Pressão detectada — a aguardar repos em curso ({len(pending)})...")
+                        break
+                    repo_path = remaining.pop(0)
+                    future = executor.submit(_chunk_single_repo, repo_path)
+                    pending[future] = repo_path
+
+                if not pending:
+                    break
+
+                # Wait for at least one to complete
+                done_iter = as_completed(pending)
+                done_future = next(done_iter)
+                repo_path = pending.pop(done_future)
                 try:
-                    name, repo_chunks = future.result()
+                    name, repo_chunks = done_future.result()
                     print(f"    [{name}] Chunks extraídos: {len(repo_chunks)}")
                     all_repo_chunks.extend(repo_chunks)
                 except Exception as e:
@@ -145,10 +201,35 @@ def sync_repos() -> None:
     print(f"==> [Repos] ChromaDB: {collection.count()} chunks na coleção '{settings.repos.collection_name}'")
 
 
+def _wait_for_resources(label: str) -> bool:
+    """Aguarda recursos disponíveis entre fases. Retorna False se disco cheio."""
+    import time as _time
+
+    from obsidian_rag.tuning import should_throttle
+
+    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+    if advice.low_disk:
+        print(f"✗ [{label}] Disco quase cheio — fase seguinte abortada. {advice.reason}")
+        return False
+    if advice.pause_sync:
+        print(f"⚠ [{label}] Sistema sob pressão após fase anterior: {advice.reason}")
+        for attempt in range(1, 4):
+            print(f"    Pausa {attempt}/3 — a aguardar 5s...")
+            _time.sleep(5)
+            advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+            if not advice.pause_sync:
+                break
+        else:
+            print(f"    [{label}] Pressão mantém-se — a continuar com precaução.")
+    return True
+
+
 def sync_local() -> None:
     """Embeddings: notas Obsidian + repos Git (só deltas — sync incremental)."""
     sync_notes()
     print()
+    if not _wait_for_resources("Transição notas→repos"):
+        return
     sync_repos()
 
 
@@ -232,7 +313,8 @@ def main() -> None:
     elif args.run_all:
         sync_local()
         print()
-        sync_graphify(force=args.force)
+        if _wait_for_resources("Transição local→graphify"):
+            sync_graphify(force=args.force)
 
 
 if __name__ == "__main__":

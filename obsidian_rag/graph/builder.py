@@ -97,6 +97,7 @@ def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
         env.setdefault("OLLAMA_API_KEY", "ollama")
 
     try:
+        timeout = settings.performance.graph_timeout or None
         result = subprocess.run(
             cmd,
             cwd=str(repo_path),
@@ -104,11 +105,19 @@ def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
             check=True,
             capture_output=True,
             text=True,
+            timeout=timeout,
         )
         if result.stderr:
             log.debug("[Graphify] stderr: %s", result.stderr.strip())
         log.info("[Graphify] Concluído. Grafo em: %s", graph_json)
         return True
+    except subprocess.TimeoutExpired:
+        log.error(
+            "[Graphify] TIMEOUT (%ds) para '%s' — skipping. "
+            "Ajusta graph_timeout em rag.toml se necessário.",
+            settings.performance.graph_timeout, repo_path.name,
+        )
+        return False
     except subprocess.CalledProcessError as e:
         log.error(
             "[Graphify] ERRO (exit code %d): %s\nstdout: %s\nstderr: %s",
@@ -134,8 +143,26 @@ def build_graphs(*, force: bool = False) -> None:
     model_info = f" | modelo: {settings.graphify.model}" if settings.graphify.model else ""
     log.info("[Graphify] Backend: %s%s | force: %s", settings.graphify.backend, model_info, force)
 
+    from obsidian_rag.tuning import should_throttle
+
     successes = 0
     for repo_path in settings.repos.paths:
+        # Resource check before each repo (graphify is LLM-intensive)
+        advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+        if advice.low_disk:
+            log.error("[Graphify] Disco quase cheio — abortado. %s", advice.reason)
+            break
+        if advice.pause_sync:
+            import time as _time
+            log.warning("[Graphify] Pressão antes de '%s': %s", Path(repo_path).name, advice.reason)
+            for attempt in range(1, 4):
+                _time.sleep(5)
+                advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+                if not advice.pause_sync:
+                    break
+            else:
+                log.warning("[Graphify] Pressão mantém-se — a continuar com precaução.")
+
         if build_graph(repo_path, force=force):
             successes += 1
 

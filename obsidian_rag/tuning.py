@@ -112,6 +112,7 @@ def auto_tune(perf: "PerformanceConfig") -> "PerformanceConfig":
         embedding_batch_size=auto_batch,
         embedding_timeout=perf.embedding_timeout,
         query_timeout_seconds=perf.query_timeout_seconds,
+        graph_timeout=perf.graph_timeout,
     )
 
     log.info(
