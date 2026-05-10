@@ -66,9 +66,9 @@ class ChromaVectorStore:
         col = self._col(collection)
         col.upsert(
             ids=ids,
-            embeddings=embeddings,
+            embeddings=embeddings,  # type: ignore[arg-type]
             documents=documents,
-            metadatas=metadatas,
+            metadatas=metadatas,  # type: ignore[arg-type]
         )
 
     def delete_ids(
@@ -102,17 +102,20 @@ class ChromaVectorStore:
     ) -> list[QueryResult]:
         col = self._col(collection)
         results = col.query(
-            query_embeddings=[embedding],
+            query_embeddings=[embedding],  # type: ignore[arg-type]
             n_results=n,
             include=["documents", "metadatas", "distances"],
         )
         if not results["ids"] or not results["ids"][0]:
             return []
+        assert results["documents"] is not None
+        assert results["metadatas"] is not None
+        assert results["distances"] is not None
         return [
             QueryResult(
                 id=rid,
                 document=doc,
-                metadata=meta,
+                metadata=dict(meta),
                 score=1.0 - dist,  # cosine distance → similarity
             )
             for rid, doc, meta, dist in zip(

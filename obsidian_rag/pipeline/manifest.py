@@ -146,7 +146,7 @@ class IngestManifest:
             ).fetchone()
         if row is None:
             return True
-        return row[0] != mtime or row[1] != size or row[2] != sha256
+        return bool(row[0] != mtime or row[1] != size or row[2] != sha256)
 
     def record_file(
         self,

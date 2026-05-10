@@ -180,14 +180,14 @@ def _count_repo_chunks(store, repo_name: str) -> int:
         from obsidian_rag.store.chroma_store import ChromaVectorStore
         if isinstance(store, ChromaVectorStore):
             col = store._col(col_name)
-            result = col.get(where={"repo_name": {"$eq": repo_name}}, include=[])
+            result = col.get(where={"repo_name": {"$eq": repo_name}}, include=[])  # type: ignore[dict-item]
             return len(result["ids"]) if result["ids"] else 0
     except ImportError:
         pass
     try:
         from obsidian_rag.store.qdrant_store import QdrantVectorStore
         if isinstance(store, QdrantVectorStore):
-            qdrant_models = store._import_qdrant()
+            qdrant_models = store._models
             result = store._client.count(
                 collection_name=col_name,
                 count_filter=qdrant_models.Filter(
@@ -197,7 +197,7 @@ def _count_repo_chunks(store, repo_name: str) -> int:
                     )]
                 ),
             )
-            return result.count
+            return int(result.count)
     except ImportError:
         pass
     return 0

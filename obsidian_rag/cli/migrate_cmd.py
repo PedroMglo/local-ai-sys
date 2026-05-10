@@ -103,7 +103,7 @@ def _get_docs_from_source(
         result = col.get(ids=ids, include=["documents", "metadatas"])
         docs = result.get("documents", []) or []
         metas = result.get("metadatas", []) or []
-        return docs, metas
+        return docs, [dict(m) for m in metas]
 
     # For Qdrant or future backends — re-query by ID would be needed
     # For now, return empty (migration from Qdrant is less common)

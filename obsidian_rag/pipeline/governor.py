@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 
 import psutil
 
@@ -105,7 +105,7 @@ class ResourceGovernor:
         self._thread: threading.Thread | None = None
 
         # Metrics file handle (opened lazily)
-        self._metrics_fh = None
+        self._metrics_fh: IO[str] | None = None
 
     # -- lifecycle --
 

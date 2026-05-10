@@ -216,13 +216,13 @@ def _get_language(lang_key: str):
         if module_name is None:
             raise ValueError(f"Unsupported language: {lang_key}")
 
-    mod = importlib.import_module(module_name)
+    lang_module = importlib.import_module(module_name)
 
     # Try language-specific callable first (e.g. language_typescript, language_tsx)
-    lang_fn = getattr(mod, f"language_{_lang_name}", None)
+    lang_fn = getattr(lang_module, f"language_{_lang_name}", None)
     # Fallback to generic language() callable
     if lang_fn is None:
-        lang_fn = getattr(mod, "language", None)
+        lang_fn = getattr(lang_module, "language", None)
     if lang_fn is None:
         raise ImportError(f"{module_name} does not expose a language() or language_{_lang_name}() function")
 
