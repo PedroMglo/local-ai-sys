@@ -29,7 +29,6 @@ class TestDangerousPathValidation:
     def test_cache_path(self):
         assert _is_dangerous_path("~/.cache") is not None
 
-    @patch("obsidian_rag.cli.init_cmd._SYSTEM", "Linux")
     def test_trash_path(self):
         assert _is_dangerous_path("~/.local/share/Trash") is not None
 

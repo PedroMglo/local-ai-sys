@@ -51,8 +51,9 @@ def _is_dangerous_path(p: str) -> str | None:
     if basename in _UNIVERSAL_DANGEROUS_NAMES:
         return f"Path perigoso (directório de desenvolvimento): {basename}"
 
+    resolved_fwd = resolved.replace("\\", "/")
     for suffix in _SENSITIVE_SUFFIXES:
-        if resolved.endswith(suffix) or f"/{suffix}/" in resolved + "/":
+        if resolved_fwd.endswith(suffix) or f"/{suffix}/" in resolved_fwd + "/":
             return f"Path sensível ({suffix}): {resolved}"
 
     # --- OS-specific checks ---
