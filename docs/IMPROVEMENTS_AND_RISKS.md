@@ -226,27 +226,27 @@ A lista de stop words é apenas em português. Queries em inglês mantêm stop w
   - Override via variável de ambiente: `RAG_API_API_KEY`
   - Retorna `401 JSONResponse` em caso de falha de autenticação
 
-### 5.2 Sem rate limiting
+### 5.2 ~~Sem rate limiting~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                            |
 | ---------------------- | -------------------------------------------------- |
-| **Prioridade**         | Média                                              |
+| **Prioridade**         | ~~Média~~ — Resolvido                              |
 | **Impacto**            | Médio — susceptível a DoS acidental ou intencional |
 | **Complexidade**       | Baixa                                              |
 | **Ficheiros afetados** | `obsidian_rag/api/app.py`                          |
 
-Não existe rate limiting nos endpoints. Chamadas massivas a `/query` ou `/chat` podem sobrecarregar o Ollama e o ChromaDB.
+**Resolução (2026-05-10):** Adicionado `slowapi>=0.1.9` como dependência. Rate limiting configurável via `[api] rate_limit = 60` (global) e `chat_rate_limit = 20` (endpoint `/chat`) em `rag.toml`. Exception handler para HTTP 429. Desativável com `rate_limit = 0`.
 
-### 5.3 Sem validação de comprimento de input
+### 5.3 ~~Sem validação de comprimento de input~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                    |
 | ---------------------- | ---------------------------------------------------------- |
-| **Prioridade**         | Média                                                      |
+| **Prioridade**         | ~~Média~~ — Resolvido                                      |
 | **Impacto**            | Médio — queries muito longas podem causar OOM no embedding |
 | **Complexidade**       | Baixa                                                      |
 | **Ficheiros afetados** | `obsidian_rag/api/app.py`, `obsidian_rag/api/schemas.py`   |
 
-Os endpoints `/query` e `/chat` não validam o comprimento da query/mensagem. Uma query de MB pode ser enviada e passada diretamente ao Ollama para embedding/chat.
+**Resolução (2026-05-10):** Adicionadas validações `min_length`/`max_length` a todos os campos string dos modelos Pydantic: `QueryRequest.query` (1–10000), `ChatMessage.role` (max 20), `ChatMessage.content` (max 50000), `ChatRequest.messages` (max 200 msgs), `ChatRequest.model` (max 100). Pydantic retorna HTTP 422 automaticamente.
 
 ### 5.4 Subprocess sem sanitização de paths
 
