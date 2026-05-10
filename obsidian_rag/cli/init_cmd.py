@@ -175,7 +175,7 @@ def _read_obsidian_config() -> str | None:
             data = json.loads(cfg_path.read_text(encoding="utf-8"))
             vaults = data.get("vaults", {})
             for vault_info in vaults.values():
-                vault_path = vault_info.get("path", "")
+                vault_path: str = vault_info.get("path", "")
                 if vault_path and Path(vault_path).exists():
                     return vault_path
         except Exception:
