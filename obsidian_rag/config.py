@@ -165,6 +165,7 @@ class PerformanceConfig:
     max_memory_percent: int      # throttle sync when RAM% exceeds this
     max_parallel_jobs: int       # effective cap on workers (overrides pipeline.max_workers when auto_tune)
     embedding_batch_size: int    # batch size for embedding calls
+    embedding_timeout: int       # max seconds for embedding HTTP calls
     query_timeout_seconds: int   # max seconds for a single query
 
 
@@ -307,6 +308,7 @@ def load_settings() -> Settings:
         max_memory_percent=_env_override("performance", "max_memory_percent", pf.get("max_memory_percent", 80)),
         max_parallel_jobs=_env_override("performance", "max_parallel_jobs", pf.get("max_parallel_jobs", 4)),
         embedding_batch_size=_env_override("performance", "embedding_batch_size", pf.get("embedding_batch_size", 50)),
+        embedding_timeout=_env_override("performance", "embedding_timeout", pf.get("embedding_timeout", 120)),
         query_timeout_seconds=_env_override("performance", "query_timeout_seconds", pf.get("query_timeout_seconds", 30)),
     )
 

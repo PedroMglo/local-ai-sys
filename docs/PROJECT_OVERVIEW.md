@@ -144,7 +144,7 @@ obsidian-rag/
 ├── docs/                       # Documentação técnica detalhada
 │   ├── PROJECT_OVERVIEW.md     # Este ficheiro
 │   └── IMPROVEMENTS_AND_RISKS.md
-├── tests/                      # Testes automatizados (pytest) — 157 testes
+├── tests/                      # Testes automatizados (pytest) — 184 testes
 │   ├── __init__.py
 │   ├── conftest.py             # Fixtures partilhadas
 │   ├── test_api.py             # Testes de auth middleware e /health
@@ -158,8 +158,7 @@ obsidian-rag/
 │   ├── test_medium_features.py # Backup, logging JSON, config, tokenizer
 │   ├── test_performance.py     # PerformanceConfig, auto_tune, throttle, workers capping
 │   ├── test_adaptive_topk.py   # Complexidade de queries, adaptive top_k scaling
-│   └── test_integration.py     # Integration tests: endpoints + ChromaDB in-memory
-├── .github/
+│   └── test_integration.py     # Integration tests: endpoints + ChromaDB in-memory│   └── test_low_priority.py    # Thread safety, Unicode, __all__, reranker cache, stop words bilíngues├── .github/
 │   ├── agents/                 # Agentes VS Code Copilot
 │   │   └── doc-reviewer.agent.md
 │   └── instructions/           # Instruções de manutenção
@@ -279,11 +278,11 @@ rag sync --all:
    - Registado em `QueryTrace.query_complexity` e `QueryTrace.effective_top_k`
 6. Pesquisa multi-estratégia:
    a. Primária: vector search (notas + código)
-   b. Secundária: keyword search (sem stop words PT)
+   b. Secundária: keyword search (sem stop words PT+EN)
    c. Terciária: title-based search
 7. Deduplicação por (source_path, section_header, chunk_index)
 8. Dynamic threshold: max(0.45, best_score × 0.75)
-9. Reranker opcional (cross-encoder via gemma3:4b, disabled por defeito)
+9. Reranker (cross-encoder via gemma3:4b, enabled por defeito, LRU cache)
 10. Relevance gate: contexto descartado se best score < 0.50 ou < 1 chunk
 11. Token budget allocation: 4000 tokens, split 40/40/20 (notas/código/grafo)
 12. Injeta contexto como system message → stream para Ollama → resposta ao utilizador
@@ -318,7 +317,7 @@ rag sync --all:
 | `router.py`        | `ContextMode` enum (NO_CONTEXT, RAG_ONLY, GRAPH_ONLY, RAG_AND_GRAPH, CLARIFY). LLM router (gemma3:4b) com keyword heuristic fallback                                        |
 | `intent.py`        | Mapeia `ContextMode` → `QueryIntent(use_notes, use_code, use_graph)`                                                                                                        |
 | `budget.py`        | Alocação de token budget: 40/40/20 (notas/código/grafo), trunca por chunks inteiros. Tokenizer regex word-boundary com multiplicador 1.3×                                   |
-| `reranker.py`      | Cross-encoder opcional via Ollama. Score 0-10, combina 60% reranker + 40% vector. Disabled por defeito                                                                      |
+| `reranker.py`      | Cross-encoder via Ollama. Score 0-10, combina 60% reranker + 40% vector. Enabled por defeito, `@lru_cache` em `_score_chunk()`                                              |
 | `graph_context.py` | Constrói bloco de contexto do grafo: nós, comunidades, vizinhos (calls, imports_from, uses), god nodes                                                                      |
 | `observe.py`       | `QueryTrace` — captura toda a cadeia de decisão: routing, retrieval, scoring, timing, `query_complexity`, `effective_top_k`. `_JsonFormatter` para logging JSON estruturado |
 
@@ -480,18 +479,21 @@ Desde a v0.4.0, todos os 5 entry points antigos (`rag-sync`, `rag-serve`, `rag-q
 
 ### Stdlib utilizada
 
-| Módulo                       | Função                                                   |
-| ---------------------------- | -------------------------------------------------------- |
-| `ast`                        | Parsing de código Python para chunking por função/classe |
-| `tomllib`                    | Leitura do `rag.toml` (Python 3.11+)                     |
-| `hashlib`                    | SHA256 para IDs de chunks (sync incremental)             |
-| `functools.lru_cache`        | Cache de embeddings de queries                           |
-| `secrets`                    | Comparação timing-safe de API keys (`compare_digest`)    |
-| `re`                         | Tokenizer regex word-boundary (`budget.py`)              |
-| `concurrent.futures`         | ThreadPoolExecutor para sync paralelo de repos           |
-| `shutil.disk_usage`          | Verificação de espaço em disco (`rag up`, `tuning.py`)   |
-| `shutil`                     | Cópia de diretórios ChromaDB para backup                 |
-| `json` / `logging.Formatter` | Logging estruturado JSON (`observe.py`)                  |
+| Módulo                       | Função                                                    |
+| ---------------------------- | --------------------------------------------------------- |
+| `ast`                        | Parsing de código Python para chunking por função/classe  |
+| `tomllib`                    | Leitura do `rag.toml` (Python 3.11+)                      |
+| `hashlib`                    | SHA256 para IDs de chunks (sync incremental)              |
+| `functools.lru_cache`        | Cache de embeddings de queries e reranker scores          |
+| `secrets`                    | Comparação timing-safe de API keys (`compare_digest`)     |
+| `threading`                  | Lock para singletons thread-safe (double-checked locking) |
+| `importlib.metadata`         | Versão centralizada via `version("obsidian-rag")`         |
+| `unicodedata`                | Normalização NFC em `_extract_keywords()`                 |
+| `re`                         | Tokenizer regex word-boundary (`budget.py`)               |
+| `concurrent.futures`         | ThreadPoolExecutor para sync paralelo de repos            |
+| `shutil.disk_usage`          | Verificação de espaço em disco (`rag up`, `tuning.py`)    |
+| `shutil`                     | Cópia de diretórios ChromaDB para backup                  |
+| `json` / `logging.Formatter` | Logging estruturado JSON (`observe.py`)                   |
 
 ## Tecnologias usadas
 
@@ -631,7 +633,7 @@ O `docker-compose.yml` monta `./data` como volume e configura `extra_hosts: host
 | `[api]`            | `host=127.0.0.1`, `port=8484`, `api_key=""` (vazio = sem auth; override: `RAG_API_API_KEY`)                                                   |
 | `[models]`         | Per-model RAG toggle (ex: `"coder-pt" = false`)                                                                                               |
 | `[router]`         | `enabled=true`, `model=gemma3:4b`, `timeout=15.0`                                                                                             |
-| `[reranker]`       | `enabled=false`, `model=gemma3:4b`, `top_k_candidates=30`                                                                                     |
+| `[reranker]`       | `enabled=true`, `model=gemma3:4b`, `top_k_candidates=30`                                                                                      |
 | `[context_policy]` | `min_relevance_score=0.50`, `min_relevant_chunks=1`                                                                                           |
 | `[debug]`          | `enabled=false`, `log_to_file=false`, `log_level=INFO`, `log_format="text"` (ou `"json"` para logging estruturado)                            |
 | `[repos]`          | `paths=[...]`, `collection_name=code_repos`                                                                                                   |
@@ -685,36 +687,35 @@ pytest tests/test_chunking_markdown.py
 pytest tests/test_api.py -v
 ```
 
-**157 testes** em 12 ficheiros, sem dependências externas (Ollama, ChromaDB):
+**184 testes** em 13 ficheiros, sem dependências externas (Ollama, ChromaDB):
 
-| Ficheiro                    | Testes | Cobertura                                                                                          |
-| --------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
-| `test_chunking_markdown.py` | 17     | `_compute_hash`, `_strip_frontmatter`, `_is_navigation_content`, `_split_by_headers`, `chunk_note` |
-| `test_chunking_code.py`     | 13     | `_split_if_long`, `_build_chunk`, `_chunk_python_source`, `_chunk_text_fallback`                   |
-| `test_router.py`            | 13     | `_heuristic_route` com queries PT/EN, sinais de grafo/locais, edge cases                           |
-| `test_budget.py`            | 16     | `estimate_tokens`, `allocate_budget`, `truncate_chunks`, `truncate_text`                           |
-| `test_api.py`               | 7      | `/health`, middleware de auth (401 missing/wrong key, pass com key correcta)                       |
-| `test_cli_dispatch.py`      | —      | Dispatcher `rag`, subcommands, argparse                                                            |
-| `test_init.py`              | —      | `rag init`: validação de paths perigosos, geração de rag.toml                                      |
-| `test_security.py`          | —      | Bind validation (`0.0.0.0` sem key), `_EXCLUDED_DIRS`, sanitização de paths                        |
-| `test_medium_features.py`   | 25     | Backup, sync paralelo, logging JSON, tokenizer regex, configurações pipeline/debug                 |
-| `test_performance.py`       | 10     | `PerformanceConfig` defaults, `auto_tune` logic, `should_throttle`, workers capping, retrocompat   |
-| `test_adaptive_topk.py`     | 16     | `_estimate_complexity`, adaptive top_k scaling (simple/normal/complex)                             |
-| `test_integration.py`       | 16     | `/query`, `/query/code`, `/stats` com ChromaDB in-memory, validação Pydantic (422)                 |
+| Ficheiro                    | Testes | Cobertura                                                                                                                                            |
+| --------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_chunking_markdown.py` | 17     | `_compute_hash`, `_strip_frontmatter`, `_is_navigation_content`, `_split_by_headers`, `chunk_note`                                                   |
+| `test_chunking_code.py`     | 13     | `_split_if_long`, `_build_chunk`, `_chunk_python_source`, `_chunk_text_fallback`                                                                     |
+| `test_router.py`            | 13     | `_heuristic_route` com queries PT/EN, sinais de grafo/locais, edge cases                                                                             |
+| `test_budget.py`            | 16     | `estimate_tokens`, `allocate_budget`, `truncate_chunks`, `truncate_text`                                                                             |
+| `test_api.py`               | 7      | `/health`, middleware de auth (401 missing/wrong key, pass com key correcta)                                                                         |
+| `test_cli_dispatch.py`      | —      | Dispatcher `rag`, subcommands, argparse                                                                                                              |
+| `test_init.py`              | —      | `rag init`: validação de paths perigosos, geração de rag.toml                                                                                        |
+| `test_security.py`          | —      | Bind validation (`0.0.0.0` sem key), `_EXCLUDED_DIRS`, sanitização de paths                                                                          |
+| `test_medium_features.py`   | 25     | Backup, sync paralelo, logging JSON, tokenizer regex, configurações pipeline/debug                                                                   |
+| `test_performance.py`       | 10     | `PerformanceConfig` defaults, `auto_tune` logic, `should_throttle`, workers capping, retrocompat                                                     |
+| `test_adaptive_topk.py`     | 16     | `_estimate_complexity`, adaptive top_k scaling (simple/normal/complex)                                                                               |
+| `test_integration.py`       | 16     | `/query`, `/query/code`, `/stats` com ChromaDB in-memory, validação Pydantic (422)                                                                   |
+| `test_low_priority.py`      | 27     | Thread-safe singletons, Unicode normalization, `__all__` exports, reranker LRU cache, stop words bilíngues, embedding timeout, `clear_embed_cache()` |
 
 Fixtures partilhadas em `conftest.py`: `tmp_source_dir`, `sample_markdown_note`, `navigation_note`, `sample_python_source`.
 
 ## Limitações conhecidas
 
-| Limitação                         | Descrição                                                                                                                                                        |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Cobertura de testes parcial**   | 157 testes (unit + integration) cobrindo chunking, router, budget, API auth, CLI, segurança, performance, adaptive top_k, endpoints. Faltam e2e tests com Ollama |
-| **Chunking AST só para Python**   | Repositórios com outras linguagens usam fallback textual (menos preciso)                                                                                         |
-| **Reranker disabled por defeito** | Adicionaria latência mas melhoraria precisão. Desativado por performance                                                                                         |
-| **Auth opcional na API**          | API key auth disponível (`Bearer`) mas desativada por defeito (campo `api_key` vazio)                                                                            |
-| **Graphify depende de LLM**       | A extração semântica de grafos requer chamadas ao Ollama, que pode ser lento                                                                                     |
-| **Single-user**                   | A arquitetura não suporta múltiplos utilizadores concorrentes de forma otimizada                                                                                 |
-| **Stop words apenas em PT**       | A lista de stop words para keyword search é apenas em português                                                                                                  |
+| Limitação                       | Descrição                                                                                                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Cobertura de testes parcial** | 184 testes (unit + integration) cobrindo chunking, router, budget, API auth, CLI, segurança, performance, adaptive top_k, low-priority, endpoints. Faltam e2e tests com Ollama |
+| **Chunking AST só para Python** | Repositórios com outras linguagens usam fallback textual (menos preciso)                                                                                                       |
+| **Auth opcional na API**        | API key auth disponível (`Bearer`) mas desativada por defeito (campo `api_key` vazio)                                                                                          |
+| **Graphify depende de LLM**     | A extração semântica de grafos requer chamadas ao Ollama, que pode ser lento                                                                                                   |
+| **Single-user**                 | A arquitetura não suporta múltiplos utilizadores concorrentes de forma otimizada                                                                                               |
 
 ## Estado atual do projeto
 
@@ -729,13 +730,13 @@ Fixtures partilhadas em `conftest.py`: `tmp_source_dir`, `sample_markdown_note`,
 | **DX**               | `install.sh` + `Makefile` + `rag init` wizard + `rag doctor` diagnóstico + `rag up` pre-flight                                                 |
 | **Config**           | `_LazySettings` proxy — config só carrega no primeiro acesso. `rag init` e `rag doctor` funcionam sem `rag.toml`                               |
 | **Router**           | LLM (gemma3:4b) + keyword heuristic fallback — funcional                                                                                       |
-| **Reranker**         | Implementado mas desativado por defeito                                                                                                        |
+| **Reranker**         | Habilitado por defeito com LRU cache em `_score_chunk()`                                                                                       |
 | **Observabilidade**  | `QueryTrace` com decisões completas + `query_complexity`/`effective_top_k`. Logging JSON. Auto-tune logging. Debug mode `--debug`              |
 | **Backup**           | `rag backup` — backup timestamped do ChromaDB com rotação automática (3 cópias)                                                                |
 | **Docker**           | `Dockerfile` multi-stage + `docker-compose.yml`. `CMD ["rag", "serve"]`. Porta 8000, volume `data/`                                            |
 | **Segurança**        | Bind validation, path validation (paths perigosos), `_EXCLUDED_DIRS`, API key + rate limiting, disk space checks                               |
 | **Documentação**     | Este ficheiro + `IMPROVEMENTS_AND_RISKS.md`                                                                                                    |
-| **Testes**           | 157 testes em 12 ficheiros com pytest. Todos passam sem deps externas                                                                          |
+| **Testes**           | 184 testes em 13 ficheiros com pytest. Todos passam sem deps externas                                                                          |
 
 ---
 

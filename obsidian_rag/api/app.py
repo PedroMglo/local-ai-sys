@@ -12,6 +12,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from obsidian_rag import __version__
 from obsidian_rag.api.schemas import (
     ChatMessage,
     ChatRequest,
@@ -91,7 +92,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Obsidian RAG API",
     description="API local para queries semânticas ao Vault Obsidian e repositórios de código",
-    version="0.4.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -133,7 +134,7 @@ async def auth_middleware(request: Request, call_next):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "obsidian-rag", "version": "0.4.0"}
+    return {"status": "ok", "service": "obsidian-rag", "version": __version__}
 
 
 @app.get("/stats", response_model=StatsResponse)

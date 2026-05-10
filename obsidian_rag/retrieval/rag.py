@@ -5,6 +5,8 @@ determines it's needed AND retrieval quality passes the relevance gate.
 """
 
 import logging
+import threading
+import unicodedata
 
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import get_query_embedding
@@ -27,12 +29,26 @@ _PT_STOP_WORDS = frozenset({
     "todas", "algum", "cada", "esse", "essa", "esses",
 })
 
+_EN_STOP_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "can",
+    "could", "did", "do", "does", "for", "from", "had", "has", "have", "he",
+    "her", "him", "his", "how", "if", "in", "into", "is", "it", "its",
+    "may", "me", "might", "must", "my", "not", "of", "on", "or", "our",
+    "shall", "she", "should", "so", "some", "than", "that", "the", "their",
+    "them", "then", "there", "these", "they", "this", "those", "to", "too",
+    "us", "very", "was", "we", "were", "what", "when", "where", "which",
+    "who", "whom", "why", "will", "with", "would", "you", "your",
+})
+
+_STOP_WORDS = _PT_STOP_WORDS | _EN_STOP_WORDS
+
 _NAVIGATION_SECTIONS = frozenset({
     "Ficheiros", "Navegação", "Índice", "Navigation", "Files", "Conteúdo",
 })
 
 
 # === Collection singletons ===
+_lock = threading.Lock()
 _chroma_client = None
 _chroma_collection = None
 _code_collection = None
@@ -48,8 +64,10 @@ def _get_collection(*, _override=None):
     if _override is not None:
         return _override
     if _chroma_collection is None:
-        _chroma_client = get_client()
-        _chroma_collection = get_collection(_chroma_client, name="obsidian_vault")
+        with _lock:
+            if _chroma_collection is None:
+                _chroma_client = get_client()
+                _chroma_collection = get_collection(_chroma_client, name="obsidian_vault")
     return _chroma_collection
 
 
@@ -63,18 +81,21 @@ def _get_code_collection(*, _override=None):
     if _override is not None:
         return _override
     if _code_collection is None:
-        if _chroma_client is None:
-            _chroma_client = get_client()
-        _code_collection = get_collection(_chroma_client, name=settings.repos.collection_name)
+        with _lock:
+            if _code_collection is None:
+                if _chroma_client is None:
+                    _chroma_client = get_client()
+                _code_collection = get_collection(_chroma_client, name=settings.repos.collection_name)
     return _code_collection
 
 
 def _reset_collections():
     """Reset singletons — for testing only."""
     global _chroma_client, _chroma_collection, _code_collection
-    _chroma_client = None
-    _chroma_collection = None
-    _code_collection = None
+    with _lock:
+        _chroma_client = None
+        _chroma_collection = None
+        _code_collection = None
 
 
 # === Helpers ===
@@ -92,8 +113,9 @@ def _is_navigation_chunk(meta: dict, doc: str) -> bool:
 
 
 def _extract_keywords(text: str) -> str:
-    words = [w.strip(".,!?:;\"'()[]") for w in text.lower().split()]
-    keywords = [w for w in words if w and w not in _PT_STOP_WORDS and len(w) > 2]
+    normalized = unicodedata.normalize("NFC", text)
+    words = [w.strip(".,!?:;\"'()[]") for w in normalized.lower().split()]
+    keywords = [w for w in words if w and w not in _STOP_WORDS and len(w) > 2]
     return " ".join(keywords) if keywords else text
 
 

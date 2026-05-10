@@ -33,7 +33,7 @@
 | **Complexidade**       | Média                                                                 |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`                                            |
 
-**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama, ChromaDB). Total atual: 157 testes em 12 ficheiros. Faltam integration tests e2e com Ollama.
+**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama, ChromaDB). Total atual: 184 testes em 13 ficheiros. Faltam integration tests e2e com Ollama.
 
 ### 1.2 ~~Singletons mutáveis para coleções ChromaDB~~ ✅ RESOLVIDO
 
@@ -46,7 +46,7 @@
 
 **Resolução (2026-05-10):** `_get_collection()` e `_get_code_collection()` aceitam agora parâmetro `_override` para injeção de dependências em testes. `_get_code_collection` partilha o `_chroma_client` global em vez de criar instância separada. Adicionada `_reset_collections()` para cleanup em testes. 16 integration tests validam o padrão com ChromaDB in-memory.
 
-### 1.3 Acoplamento entre retrieval e ChromaDB
+### 1.3 Acoplamento entre retrieval e ChromaDB — ⏸️ DEFERRED
 
 | Campo                  | Detalhe                                                                           |
 | ---------------------- | --------------------------------------------------------------------------------- |
@@ -57,16 +57,18 @@
 
 O `rag.py` importa diretamente funções do `chroma.py`. Não existe abstração (interface/protocolo) para o vector store, o que torna a substituição do ChromaDB trabalhosa.
 
-### 1.4 Dependência de subprocess para Graphify
+**Decisão (2026-05-10):** Deferred — complexidade alta e não existem planos para trocar o ChromaDB. Para uso pessoal, o acoplamento direto é aceitável e mais simples de manter.
 
-| Campo                  | Detalhe                                            |
-| ---------------------- | -------------------------------------------------- |
-| **Prioridade**         | Baixa                                              |
-| **Impacto**            | Baixo — funciona, mas é frágil e difícil de testar |
-| **Complexidade**       | Baixa                                              |
-| **Ficheiros afetados** | `obsidian_rag/graph/builder.py`                    |
+### 1.4 ~~Dependência de subprocess para Graphify~~ ✅ RESOLVIDO
 
-O `builder.py` invoca `graphify extract` via `subprocess.run`. Erros do CLI são capturados apenas pelo return code e stdout/stderr. Não existe tratamento estruturado de erros da ferramenta.
+| Campo                  | Detalhe                                              |
+| ---------------------- | ---------------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                |
+| **Impacto**            | Baixo — funciona, mas era frágil e difícil de testar |
+| **Complexidade**       | Baixa                                                |
+| **Ficheiros afetados** | `obsidian_rag/graph/builder.py`                      |
+
+**Resolução (2026-05-10):** Todos os `print()` substituídos por `log.info()`/`log.warning()`/`log.error()` usando logging standard. `subprocess.run` agora usa `capture_output=True, text=True` e regista stderr em caso de falha. Erros estruturados em vez de output ao stdout.
 
 ---
 
@@ -83,38 +85,38 @@ O `builder.py` invoca `graphify extract` via `subprocess.run`. Erros do CLI são
 
 **Resolução (2026-05-10):** `estimate_tokens()` agora usa tokenização regex word-boundary (`re.findall(r'\b\w+\b', text)`) com multiplicador 1.3× em vez de `len(text) // 4`. Mais preciso para textos multilíngues (PT + EN) e código.
 
-### 2.2 Embedding cache com LRU fixo
+### 2.2 ~~Embedding cache com LRU fixo~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                                                 |
-| ---------------------- | ------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                   |
-| **Impacto**            | Baixo — pode desperdiçar memória ou causar cache misses |
-| **Complexidade**       | Baixa                                                   |
-| **Ficheiros afetados** | `obsidian_rag/embeddings/ollama.py`                     |
+| Campo                  | Detalhe                                                  |
+| ---------------------- | -------------------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                    |
+| **Impacto**            | Baixo — podia desperdiçar memória ou causar cache misses |
+| **Complexidade**       | Baixa                                                    |
+| **Ficheiros afetados** | `obsidian_rag/embeddings/ollama.py`                      |
 
-O `@lru_cache(maxsize=128)` em `_cached_embed()` é aplicado ao nível do módulo. O cache nunca é invalidado (exceto por eviction LRU). Em sessões longas, pode acumular embeddings desatualizados.
+**Resolução (2026-05-10):** Adicionada função `clear_embed_cache()` que invoca `_cached_embed.cache_clear()`. Chamada no início de `sync_notes()` para garantir embeddings frescos após sync. O LRU continua ativo para queries repetidas durante uma sessão.
 
-### 2.3 Timeouts hardcoded no embed_texts
+### 2.3 ~~Timeouts hardcoded no embed_texts~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                                                              |
-| ---------------------- | -------------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                                |
-| **Impacto**            | Baixo — o timeout de 120s pode ser insuficiente para batches grandes |
-| **Complexidade**       | Baixa                                                                |
-| **Ficheiros afetados** | `obsidian_rag/embeddings/ollama.py`                                  |
+| Campo                  | Detalhe                                                               |
+| ---------------------- | --------------------------------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                                 |
+| **Impacto**            | Baixo — o timeout de 120s podia ser insuficiente para batches grandes |
+| **Complexidade**       | Baixa                                                                 |
+| **Ficheiros afetados** | `obsidian_rag/embeddings/ollama.py`, `obsidian_rag/config.py`         |
 
-O `httpx.post()` em `embed_texts()` usa `timeout=120.0` hardcoded. Deveria ser configurável via `rag.toml`.
+**Resolução (2026-05-10):** Novo campo `embedding_timeout: int` (default 120) em `PerformanceConfig`. Usado em `embed_texts()` em vez do valor hardcoded. Configurável via `[performance] embedding_timeout` em `rag.toml`.
 
-### 2.4 Graphify `OLLAMA_API_KEY=ollama` hardcoded
+### 2.4 ~~Graphify `OLLAMA_API_KEY=ollama` hardcoded~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                                    |
-| ---------------------- | ------------------------------------------ |
-| **Prioridade**         | Baixa                                      |
-| **Impacto**            | Baixo — funciona localmente, mas é confuso |
-| **Complexidade**       | Baixa                                      |
-| **Ficheiros afetados** | `obsidian_rag/graph/builder.py`            |
+| Campo                  | Detalhe                                        |
+| ---------------------- | ---------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                          |
+| **Impacto**            | Baixo — funcionava localmente, mas era confuso |
+| **Complexidade**       | Baixa                                          |
+| **Ficheiros afetados** | `obsidian_rag/graph/builder.py`                |
 
-O `builder.py` injeta `OLLAMA_API_KEY=ollama` no ambiente do subprocess. Este valor é um placeholder necessário pela ferramenta Graphify, mas está hardcoded sem documentação inline.
+**Resolução (2026-05-10):** Adicionado comentário inline em `builder.py` explicando que `OLLAMA_API_KEY=ollama` é um placeholder obrigatório para litellm usado pelo graphify, não uma credencial real.
 
 ---
 
@@ -153,53 +155,53 @@ O `builder.py` injeta `OLLAMA_API_KEY=ollama` no ambiente do subprocess. Este va
 
 **Resolução (2026-05-10):** Criado `.github/workflows/ci.yml` com dois jobs: `lint` (ruff check + mypy) e `test` (pytest + coverage --fail-under=50). Triggers: push/PR na branch main.
 
-### 3.4 ~~Versão hardcoded em múltiplos locais~~
+### 3.4 ~~Versão hardcoded em múltiplos locais~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                                                                                    |
-| ---------------------- | ------------------------------------------------------------------------------------------ |
-| **Prioridade**         | Baixa                                                                                      |
-| **Impacto**            | Baixo — risco de dessincronização de versões                                               |
-| **Complexidade**       | Baixa                                                                                      |
-| **Ficheiros afetados** | `pyproject.toml` (v0.4.0), `obsidian_rag/api/app.py` (versão em `/health` e FastAPI title) |
+| Campo                  | Detalhe                                                                 |
+| ---------------------- | ----------------------------------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                                   |
+| **Impacto**            | Baixo — risco de dessincronização de versões eliminado                  |
+| **Complexidade**       | Baixa                                                                   |
+| **Ficheiros afetados** | `pyproject.toml`, `obsidian_rag/__init__.py`, `obsidian_rag/api/app.py` |
 
-A versão `0.3.0` está hardcoded em pelo menos 3 locais. Deveria usar-se `importlib.metadata.version()` ou uma variável centralizada.
+**Resolução (2026-05-10):** `__version__` centralizado em `__init__.py` via `importlib.metadata.version("obsidian-rag")`. `app.py` importa `__version__` em vez de hardcodar. Fonte única de verdade: `pyproject.toml`.
 
 ---
 
 ## 4. Possíveis bugs e inconsistências
 
-### 4.1 Race condition na inicialização de singletons
+### 4.1 ~~Race condition na inicialização de singletons~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                                         |
 | ---------------------- | ------------------------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                                           |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                                           |
 | **Impacto**            | Baixo — improvável em single-worker, mas possível com múltiplos workers uvicorn |
 | **Complexidade**       | Baixa                                                                           |
 | **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py`                                                 |
 
-Os singletons `_chroma_collection` e `_code_collection` não são thread-safe. Se o uvicorn usar múltiplos workers, pode haver inicializações duplicadas.
+**Resolução (2026-05-10):** Adicionado `threading.Lock()` com padrão double-checked locking em `_get_collection()` e `_get_code_collection()`. `_reset_collections()` também usa lock para cleanup thread-safe.
 
-### 4.2 Keyword search sem normalização Unicode
+### 4.2 ~~Keyword search sem normalização Unicode~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                                                             |
-| ---------------------- | ------------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                               |
-| **Impacto**            | Baixo — queries com acentos podem falhar na correspondência keyword |
-| **Complexidade**       | Baixa                                                               |
-| **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py` (`_extract_keywords()`)             |
+| Campo                  | Detalhe                                                              |
+| ---------------------- | -------------------------------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                                |
+| **Impacto**            | Baixo — queries com acentos podiam falhar na correspondência keyword |
+| **Complexidade**       | Baixa                                                                |
+| **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py` (`_extract_keywords()`)              |
 
-A função `_extract_keywords()` faz `.lower()` mas não normaliza caracteres Unicode (NFD/NFC). Acentos e diacríticos podem impedir matches legítimos.
+**Resolução (2026-05-10):** `_extract_keywords()` aplica `unicodedata.normalize("NFC", text)` antes do processamento. Garante consistência entre caracteres compostos e decompostos.
 
-### 4.3 Stop words exclusivamente em português
+### 4.3 ~~Stop words exclusivamente em português~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                                            |
-| ---------------------- | -------------------------------------------------- |
-| **Prioridade**         | Baixa                                              |
-| **Impacto**            | Baixo — keyword search em inglês é menos eficaz    |
-| **Complexidade**       | Baixa                                              |
-| **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py` (`_PT_STOP_WORDS`) |
+| Campo                  | Detalhe                                                              |
+| ---------------------- | -------------------------------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                                |
+| **Impacto**            | Baixo — keyword search em inglês era menos eficaz                    |
+| **Complexidade**       | Baixa                                                                |
+| **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py` (`_PT_STOP_WORDS`, `_EN_STOP_WORDS`) |
 
-A lista de stop words é apenas em português. Queries em inglês mantêm stop words como "the", "is", "are" nos termos de pesquisa keyword, reduzindo eficácia.
+**Resolução (2026-05-10):** Adicionado `_EN_STOP_WORDS` frozenset (~70 stop words em inglês). Unificado em `_STOP_WORDS = _PT_STOP_WORDS | _EN_STOP_WORDS`, usado em `_extract_keywords()`.
 
 ---
 
@@ -259,7 +261,7 @@ A lista de stop words é apenas em português. Queries em inglês mantêm stop w
 
 **Melhoria (v0.4.0):** `rag init` agora valida paths contra locações perigosas (`/`, `~`, `.ssh`, `.gnupg`, `.cache`, `.local/share/Trash`, directorias de sistema). Paths em `rag.toml` passam por validação antes de serem escritos. Os paths em `builder.py` continuam sem validação runtime (risco baixo pois vêm de `rag.toml`).
 
-### 5.5 ChromaDB telemetria desativada mas sem validação
+### 5.5 ChromaDB telemetria desativada mas sem validação — ⏸️ DEFERRED
 
 | Campo                  | Detalhe                                               |
 | ---------------------- | ----------------------------------------------------- |
@@ -269,6 +271,8 @@ A lista de stop words é apenas em português. Queries em inglês mantêm stop w
 | **Ficheiros afetados** | `obsidian_rag/store/chroma.py`                        |
 
 A telemetria do ChromaDB é desativada explicitamente (`anonymized_telemetry=False`), o que é correto. Mantém-se como nota de verificação.
+
+**Decisão (2026-05-10):** Deferred — já está correto (`anonymized_telemetry=False`), sem ação necessária.
 
 ---
 
@@ -289,14 +293,16 @@ O projeto é 100% local: Ollama local, ChromaDB local, sem APIs externas. Este �
 
 **Resolução (2026-05-10):** Novo módulo `obsidian_rag/pipeline/backup.py` com função `backup_chroma()`. Cria cópias timestamped do diretório ChromaDB via `shutil.copytree` com rotação automática (mantém últimas 3 cópias). Novo entry point CLI `rag-backup` em `pyproject.toml`.
 
-### 6.3 Ficheiros source/ contêm cópia do vault
+### 6.3 ~~Ficheiros source/ contêm cópia do vault~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                               |
-| ---------------------- | ------------------------------------- |
-| **Prioridade**         | Baixa                                 |
-| **Impacto**            | Baixo — duplicação de dados sensíveis |
-| **Complexidade**       | Baixa                                 |
-| **Ficheiros afetados** | `source/`                             |
+| Campo                  | Detalhe                                       |
+| ---------------------- | --------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                         |
+| **Impacto**            | Baixo — duplicação de dados sensíveis evitada |
+| **Complexidade**       | Baixa                                         |
+| **Ficheiros afetados** | `source/`, `.gitignore`                       |
+
+**Resolução (2026-05-10):** Adicionado `source/` ao `.gitignore` para prevenir commits acidentais de dados pessoais do vault.
 
 A pasta `source/` contém uma cópia (rsync) das notas Obsidian. Se o repositório for partilhado, dados pessoais podem ser expostos. O `.gitignore` deve excluir `source/` e `data/`.
 
@@ -326,16 +332,16 @@ A pasta `source/` contém uma cópia (rsync) das notas Obsidian. Se o repositór
 
 **Resolução (2026-05-10):** O batch size de embeddings é agora configurável via `[performance] embedding_batch_size` em `rag.toml`. Quando `auto_tune=true` (default), o valor é ajustado automaticamente com base na RAM disponível: 25 (<8GB), 50 (8-16GB), 100 (>16GB). Novo `PerformanceConfig` em `config.py`, com auto-tuning em `tuning.py`.
 
-### 7.3 Router LLM adiciona latência
+### 7.3 ~~Router LLM adiciona latência~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                              |
 | ---------------------- | -------------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                                |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                                |
 | **Impacto**            | Baixo — gemma3:4b é rápido (~77 tok/s) mas adiciona 0.5-2s por query |
 | **Complexidade**       | Baixa                                                                |
 | **Ficheiros afetados** | `obsidian_rag/retrieval/router.py`                                   |
 
-Cada query passa pelo LLM router antes do retrieval. Com `gemma3:4b` é rápido, mas adiciona latência percetível. O fallback para keyword heuristic em caso de timeout (15s) mitiga o pior caso.
+**Resolução (2026-05-10):** `_llm_route()` agora usa `settings.performance.query_timeout_seconds` em vez de `timeout=15.0` hardcoded. O timeout é configurável via `[performance] query_timeout_seconds` em `rag.toml`. Latência mitigada pelo timeout configurável e heuristic fallback.
 
 ---
 
@@ -379,16 +385,16 @@ Toda a configuração está em `rag.toml` com env overrides, frozen dataclasses 
 
 Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 comandos separados. O dispatcher em `cli/main.py` usa imports lazy para não carregar `settings` em comandos que não precisam (ex: `rag init`, `rag doctor`).
 
-### 9.4 Falta de `__all__` exports
+### 9.4 ~~Falta de `__all__` exports~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                                                          |
-| ---------------------- | ---------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                            |
-| **Impacto**            | Baixo — API pública dos módulos não está definida explicitamente |
-| **Complexidade**       | Baixa                                                            |
-| **Ficheiros afetados** | Todos os `__init__.py`                                           |
+| Campo                  | Detalhe                                                       |
+| ---------------------- | ------------------------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                         |
+| **Impacto**            | Baixo — API pública dos módulos agora definida explicitamente |
+| **Complexidade**       | Baixa                                                         |
+| **Ficheiros afetados** | Todos os `__init__.py`                                        |
 
-Os ficheiros `__init__.py` não definem `__all__`, tornando o API público de cada módulo implícito.
+**Resolução (2026-05-10):** Adicionado `__all__` a todos os ficheiros `__init__.py` do projeto, definindo explicitamente a API pública de cada módulo.
 
 ---
 
@@ -403,7 +409,7 @@ Os ficheiros `__init__.py` não definem `__all__`, tornando o API público de ca
 | **Complexidade**       | Média                                  |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`             |
 
-**Resolução (2026-05-10):** 157 testes implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation, bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling e integration tests com TestClient + ChromaDB in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
+**Resolução (2026-05-10):** 184 testes implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation, bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout e integration tests com TestClient + ChromaDB in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
 
 ### 10.2 ~~Autenticação da API~~ ✅ RESOLVIDO
 
@@ -477,16 +483,16 @@ Os ficheiros `__init__.py` não definem `__all__`, tornando o API público de ca
 
 O AST chunking só funciona para Python. Para suportar JavaScript, TypeScript, Rust, etc., seria necessário integrar tree-sitter ou equivalente.
 
-### 10.9 Reranker habilitado por defeito (com cache)
+### 10.9 ~~Reranker habilitado por defeito (com cache)~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                          |
 | ---------------------- | ------------------------------------------------ |
-| **Prioridade**         | Baixa                                            |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                            |
 | **Impacto**            | Médio — melhora qualidade das respostas          |
 | **Complexidade**       | Baixa                                            |
 | **Ficheiros afetados** | `obsidian_rag/retrieval/reranker.py`, `rag.toml` |
 
-O reranker está implementado mas desativado. Habilitar por defeito com cache de resultados reduziria o impacto na latência.
+**Resolução (2026-05-10):** Reranker habilitado por defeito (`enabled=true` em `[reranker]`). Adicionado `@lru_cache` em `_score_chunk()` para evitar re-scoring de chunks idênticos. Impacto na latência mitigado pelo cache.
 
 ### 10.10 ~~Sync paralelo~~ ✅ RESOLVIDO
 
@@ -499,16 +505,16 @@ O reranker está implementado mas desativado. Habilitar por defeito com cache de
 
 **Resolução (2026-05-10):** `sync_repos()` agora usa `concurrent.futures.ThreadPoolExecutor` com `max_workers` configurável (defeito: 4). Novo dataclass `PipelineConfig` em `config.py`. Configuração via `[pipeline] max_workers` em `rag.toml`.
 
-### 10.11 Stop words bilíngues
+### 10.11 ~~Stop words bilíngues~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                                  |
-| ---------------------- | ---------------------------------------- |
-| **Prioridade**         | Baixa                                    |
-| **Impacto**            | Baixo — melhora keyword search em inglês |
-| **Complexidade**       | Baixa                                    |
-| **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py`          |
+| Campo                  | Detalhe                                |
+| ---------------------- | -------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                  |
+| **Impacto**            | Baixo — keyword search melhorado em EN |
+| **Complexidade**       | Baixa                                  |
+| **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py`        |
 
-Adicionar stop words em inglês à lista `_PT_STOP_WORDS` ou criar lista separada `_EN_STOP_WORDS`.
+**Resolução (2026-05-10):** Adicionado `_EN_STOP_WORDS` frozenset (~70 stop words em inglês). Unificado em `_STOP_WORDS = _PT_STOP_WORDS | _EN_STOP_WORDS`, usado em `_extract_keywords()`. Ver §4.3.
 
 ### 10.12 ~~Health check do Ollama no lifespan~~ ✅ RESOLVIDO
 
@@ -555,16 +561,16 @@ Adicionar stop words em inglês à lista `_PT_STOP_WORDS` ou criar lista separad
 
 ### Fase 3 — Evolução (Baixa prioridade)
 
-| #   | Tarefa                                   | Complexidade | Estado                                          |
-| --- | ---------------------------------------- | ------------ | ----------------------------------------------- |
-| 11  | ~~Dockerfile + docker-compose~~          | Baixa        | ✅ Concluído                                    |
-| 12  | ~~Logging estruturado (JSON)~~           | Baixa        | ✅ Concluído                                    |
-| 13  | Habilitar reranker com cache             | Baixa        |                                                 |
-| 14  | ~~Sync paralelo para múltiplos repos~~   | Média        | ✅ Concluído                                    |
-| 15  | Chunking multi-linguagem (tree-sitter)   | Alta         |                                                 |
-| 16  | Versão centralizada (importlib.metadata) | Baixa        |                                                 |
-| 17  | ~~Health check do Ollama no startup~~    | Baixa        | ✅ Concluído (v0.4.0 — `rag up` + `rag doctor`) |
-| 18  | Stop words bilíngues (PT + EN)           | Baixa        |                                                 |
+| #   | Tarefa                                       | Complexidade | Estado                                          |
+| --- | -------------------------------------------- | ------------ | ----------------------------------------------- |
+| 11  | ~~Dockerfile + docker-compose~~              | Baixa        | ✅ Concluído                                    |
+| 12  | ~~Logging estruturado (JSON)~~               | Baixa        | ✅ Concluído                                    |
+| 13  | ~~Habilitar reranker com cache~~             | Baixa        | ✅ Concluído                                    |
+| 14  | ~~Sync paralelo para múltiplos repos~~       | Média        | ✅ Concluído                                    |
+| 15  | Chunking multi-linguagem (tree-sitter)       | Alta         | ⏸️ Deferred (Fase C)                            |
+| 16  | ~~Versão centralizada (importlib.metadata)~~ | Baixa        | ✅ Concluído                                    |
+| 17  | ~~Health check do Ollama no startup~~        | Baixa        | ✅ Concluído (v0.4.0 — `rag up` + `rag doctor`) |
+| 18  | ~~Stop words bilíngues (PT + EN)~~           | Baixa        | ✅ Concluído                                    |
 
 ### Fase 4 — DX e Onboarding (v0.4.0) ✅
 
@@ -598,6 +604,26 @@ Adicionar stop words em inglês à lista `_PT_STOP_WORDS` ou criar lista separad
 | 37  | ~~26 novos testes (performance + adaptive top_k) — 157 total~~   | Média        | ✅ Concluído |
 
 > **Fase 5 concluída em 2026-05-10.** Auto-tuning de recursos, adaptive top_k, proteção de recursos no sync, verificação de disco, nova dependência `psutil`.
+
+### Fase 6 — Polimento e robustez (Baixa prioridade) ✅
+
+| #   | Tarefa                                                              | Complexidade | Estado       |
+| --- | ------------------------------------------------------------------- | ------------ | ------------ |
+| 38  | ~~Versão centralizada (`importlib.metadata.version()`)~~            | Baixa        | ✅ Concluído |
+| 39  | ~~Normalização Unicode em `_extract_keywords()`~~                   | Baixa        | ✅ Concluído |
+| 40  | ~~Stop words bilíngues (PT + EN)~~                                  | Baixa        | ✅ Concluído |
+| 41  | ~~Embedding timeout configurável (`PerformanceConfig`)~~            | Baixa        | ✅ Concluído |
+| 42  | ~~`OLLAMA_API_KEY` documentado como placeholder litellm~~           | Baixa        | ✅ Concluído |
+| 43  | ~~`source/` adicionado ao `.gitignore`~~                            | Baixa        | ✅ Concluído |
+| 44  | ~~`__all__` exports em todos os `__init__.py`~~                     | Baixa        | ✅ Concluído |
+| 45  | ~~Thread-safe singletons (`threading.Lock()`)~~                     | Baixa        | ✅ Concluído |
+| 46  | ~~`clear_embed_cache()` chamado no início de `sync_notes()`~~       | Baixa        | ✅ Concluído |
+| 47  | ~~Router timeout via `settings.performance.query_timeout_seconds`~~ | Baixa        | ✅ Concluído |
+| 48  | ~~Graphify subprocess com `logging` em vez de `print()`~~           | Baixa        | ✅ Concluído |
+| 49  | ~~Reranker habilitado por defeito + LRU cache em `_score_chunk()`~~ | Baixa        | ✅ Concluído |
+| 50  | ~~27 novos testes (`test_low_priority.py`) — 184 total~~            | Média        | ✅ Concluído |
+
+> **Fase 6 concluída em 2026-05-10.** Polimento de baixa prioridade: thread safety, normalização Unicode, stop words bilíngues, `__all__` exports, timeouts configuráveis, reranker com cache LRU, logging estruturado em subprocess. Deferred para Fase C: §1.3 (vector store interface), §10.8 (tree-sitter chunking), §8.1/§8.2 (escalabilidade).
 
 ---
 

@@ -69,7 +69,7 @@ timeout = 15.0
 # Melhora precisão ao custo de latência extra
 # =============================================================================
 [reranker]
-enabled = false
+enabled = true
 # Modelo Ollama para scoring de relevância
 model = "gemma3:4b"
 # Quantos candidatos avaliar (top_k_candidates > top_k final)
@@ -127,6 +127,8 @@ max_memory_percent = 80
 max_parallel_jobs = 4
 # Tamanho do batch para chamadas de embeddings
 embedding_batch_size = 50
+# Timeout máximo para chamadas HTTP de embeddings (segundos)
+embedding_timeout = 120
 # Timeout máximo por query (segundos)
 query_timeout_seconds = 30
 

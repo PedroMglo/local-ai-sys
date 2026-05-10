@@ -11,11 +11,14 @@ Os grafos ficam persistidos em:
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from pathlib import Path
 
 from obsidian_rag.config import settings
+
+log = logging.getLogger(__name__)
 
 
 def _graphify_output_dir(repo_path: Path) -> Path:
@@ -49,7 +52,7 @@ def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
     """
     repo_path = Path(repo_path).expanduser().resolve()
     if not repo_path.exists():
-        print(f"    [Graphify] Repo não encontrado: {repo_path} — skipping.")
+        log.warning("[Graphify] Repo não encontrado: %s — skipping.", repo_path)
         return False
 
     output_dir = _graphify_output_dir(repo_path)
@@ -62,11 +65,10 @@ def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
     # force=True: apagar manifest para trigger rebuild completo (AST + LLM)
     if force and manifest_json.exists():
         manifest_json.unlink()
-        print("    [Graphify] Manifest removido — rebuild completo forçado.")
+        log.info("[Graphify] Manifest removido — rebuild completo forçado.")
 
     if graph_json.exists() and not force and not settings.graphify.auto_update:
-        print(f"    [Graphify] Grafo já existe para '{repo_path.name}' e auto_update=false — skipping.")
-        print("    Para forçar rebuild completo: rag-sync -g --force")
+        log.info("[Graphify] Grafo já existe para '%s' e auto_update=false — skipping.", repo_path.name)
         return True
 
     mode = "rebuild completo" if force else ("incremental" if manifest_json.exists() else "build inicial")
@@ -81,8 +83,8 @@ def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
     if settings.graphify.model:
         cmd += ["--model", settings.graphify.model]
 
-    print(f"==> [Graphify] {repo_path.name} — {mode}")
-    print(f"    Comando: {' '.join(cmd)}")
+    log.info("[Graphify] %s — %s", repo_path.name, mode)
+    log.debug("[Graphify] Comando: %s", " ".join(cmd))
 
     # Graphify exige OLLAMA_BASE_URL para o backend ollama.
     # Injectar a partir do base_url configurado em rag.toml [ollama].
@@ -90,20 +92,28 @@ def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
     if settings.graphify.backend == "ollama":
         ollama_base = settings.ollama.base_url.rstrip("/")
         env.setdefault("OLLAMA_BASE_URL", f"{ollama_base}/v1")
+        # Graphify exige OLLAMA_API_KEY mas não o usa como credencial real;
+        # é um placeholder obrigatório da lib litellm que o graphify usa.
         env.setdefault("OLLAMA_API_KEY", "ollama")
 
     try:
-        subprocess.run(
+        result = subprocess.run(
             cmd,
             cwd=str(repo_path),
             env=env,
             check=True,
-            capture_output=False,
+            capture_output=True,
+            text=True,
         )
-        print(f"    [Graphify] Concluído. Grafo em: {graph_json}")
+        if result.stderr:
+            log.debug("[Graphify] stderr: %s", result.stderr.strip())
+        log.info("[Graphify] Concluído. Grafo em: %s", graph_json)
         return True
     except subprocess.CalledProcessError as e:
-        print(f"    [Graphify] ERRO (exit code {e.returncode}): {e}")
+        log.error(
+            "[Graphify] ERRO (exit code %d): %s\nstdout: %s\nstderr: %s",
+            e.returncode, e, (e.stdout or "").strip(), (e.stderr or "").strip(),
+        )
         return False
     except FileNotFoundError:
         raise FileNotFoundError(
@@ -118,18 +128,18 @@ def build_graphs(*, force: bool = False) -> None:
     Se *force* for True, faz update mesmo que auto_update=false.
     """
     if not settings.repos.paths:
-        print("==> [Graphify] Sem repos configurados. Skipping.")
+        log.info("[Graphify] Sem repos configurados. Skipping.")
         return
 
     model_info = f" | modelo: {settings.graphify.model}" if settings.graphify.model else ""
-    print(f"==> [Graphify] Backend: {settings.graphify.backend}{model_info} | force: {force}")
+    log.info("[Graphify] Backend: %s%s | force: %s", settings.graphify.backend, model_info, force)
 
     successes = 0
     for repo_path in settings.repos.paths:
         if build_graph(repo_path, force=force):
             successes += 1
 
-    print(f"==> [Graphify] {successes}/{len(settings.repos.paths)} repos processados.")
+    log.info("[Graphify] %d/%d repos processados.", successes, len(settings.repos.paths))
 
 
 def graph_exists(repo_name: str) -> bool:
