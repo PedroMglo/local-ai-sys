@@ -154,7 +154,6 @@ def stats():
 
 def _query_store(store, collection_name: str, req: QueryRequest) -> list[ChunkResult]:
     """Executa query vectorial via VectorStore e devolve ChunkResults."""
-    from obsidian_rag.store.base import QueryResult as QR
     query_embedding = get_query_embedding(req.query)
     results = store.query(query_embedding, n=req.top_k, collection=collection_name)
     chunks = []

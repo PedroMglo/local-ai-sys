@@ -202,6 +202,7 @@ def supported_extensions() -> set[str]:
 def _get_language(lang_key: str):
     """Lazy-load and return a tree_sitter.Language for the given key."""
     import importlib
+
     import tree_sitter as ts
 
     module_name, _lang_name = _LANG_REGISTRY.get(f".{lang_key}", (None, None))
@@ -411,7 +412,6 @@ def _extract_methods(
     chunk_index: int,
 ) -> None:
     """Extract individual methods from a class/impl/struct node."""
-    from obsidian_rag.chunking.code import _build_chunk, _split_if_long
 
     method_types = {
         "method_definition", "method_declaration", "method",

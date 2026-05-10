@@ -14,18 +14,16 @@ CLI:
 from __future__ import annotations
 
 import argparse
-import gc
 import os
 from pathlib import Path
 
-from obsidian_rag.chunking.code import chunk_repo
 from obsidian_rag.chunking.markdown import chunk_all_notes
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import clear_embed_cache
 from obsidian_rag.pipeline.ingest import IngestPipeline, IngestSource
 from obsidian_rag.pipeline.manifest import IngestManifest
 from obsidian_rag.pipeline.vault_sync import sync_vault
-from obsidian_rag.store.base import VectorStore, create_store
+from obsidian_rag.store.base import create_store
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,6 +38,7 @@ def _sync_chunks_to_store(
 ) -> None:
     """Incremental sync: embed new chunks, delete stale, upsert via VectorStore."""
     import time
+
     from obsidian_rag.embeddings.ollama import embed_texts
     from obsidian_rag.tuning import should_throttle
 
