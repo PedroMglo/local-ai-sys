@@ -83,6 +83,13 @@ def main() -> None:
     p_graph_build.add_argument("--repo", metavar="NOME", help="Repo específico")
     graph_sub.add_parser("status", help="Estado dos grafos")
 
+    # --- rag schedule ---
+    p_schedule = sub.add_parser("schedule", help="Agendamento automático de sync (systemd/launchd/schtasks)")
+    schedule_sub = p_schedule.add_subparsers(dest="schedule_command", help="Subcomando do schedule")
+    schedule_sub.add_parser("install", help="Instalar sync diário automático")
+    schedule_sub.add_parser("remove", help="Remover agendamento")
+    schedule_sub.add_parser("status", help="Estado do agendamento")
+
     # --- Parse ---
     args = parser.parse_args()
 
@@ -133,6 +140,10 @@ def main() -> None:
     elif args.command == "graph":
         from obsidian_rag.cli.graph_cmd import run_graph
         run_graph(args)
+
+    elif args.command == "schedule":
+        from obsidian_rag.cli.schedule_cmd import run_schedule
+        run_schedule(args)
 
     else:
         parser.print_help()
