@@ -40,6 +40,9 @@ treesitter = [
     "tree-sitter-c-sharp>=0.23",
     "tree-sitter-ruby>=0.23",
 ]
+dask = [
+    "dask[distributed]>=2024.1",
+]
 
 [project.scripts]
 rag = "obsidian_rag.cli.main:main"
@@ -98,5 +101,14 @@ exclude_dirs = [
 ]
 
 skips = [
-  "B101"
+  "B101",   # assert used (expected in tests)
+  "B104",   # bind all interfaces — guarded by api_key check in code
+  "B108",   # hardcoded tmp — frozenset of dangerous paths, not a temp file
+  "B110",   # try/except/pass (intentional silent fallback patterns)
+  "B112",   # try/except/continue (intentional)
+  "B310",   # urllib.urlopen — URL is a controlled local Ollama endpoint
+  "B404",   # import subprocess (required for system commands)
+  "B603",   # subprocess without shell=True (safe — no user input)
+  "B607",   # partial executable path (controlled paths)
+  "B608"    # SQL string formatting — placeholders are parameterised, not user input
 ]
