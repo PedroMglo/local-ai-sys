@@ -788,12 +788,12 @@ Fixtures partilhadas em `conftest.py`: `tmp_source_dir`, `sample_markdown_note`,
 | **Reranker**         | Habilitado por defeito com LRU cache em `_score_chunk()`                                                                                                           |
 | **Observabilidade**  | `QueryTrace` com decisões completas + `query_complexity`/`effective_top_k`. Logging JSON. Auto-tune logging. Debug mode `--debug`                                  |
 | **Backup**           | `rag backup` — backup timestamped do ChromaDB com rotação automática (3 cópias)                                                                                    |
-| **Docker**           | `Dockerfile` multi-stage + `docker-compose.yml`. User não-root `rag` (UID 1000). `CMD ["rag", "serve"]`. Porta 8000, volume `data/`                                |
-| **Segurança**        | Bind validation, path validation cross-platform (paths perigosos), `_EXCLUDED_DIRS`, API key + rate limiting, disk space checks                                    |
+| **Docker**           | `Dockerfile` multi-stage + `docker-compose.yml`. User não-root (UID 1000). `HEALTHCHECK` Python stdlib. Bind `127.0.0.1` por defeito. Volume `data/`               |
+| **Segurança**        | `SECURITY.md`, bind validation, path validation cross-platform, API key + rate limiting, CodeQL, Dependabot (pip + actions + docker)                               |
 | **Sync**             | 4 backends: `direct` (default, cross-platform), `python`, `rsync`, `auto`. Configurável em `[sync]`                                                                |
 | **Documentação**     | Este ficheiro + `IMPROVEMENTS_AND_RISKS.md`                                                                                                                        |
 | **Testes**           | 226 testes em 14 ficheiros com pytest. Todos passam sem deps externas. Cobertura: 61%                                                                              |
-| **CI/CD**            | 3 workflows GitHub Actions: `ci.yml` (matrix 3 OS × 2 Python + lint + security), `docker.yml`, `release.yml`. Sem Ollama/GPU em CI                                 |
+| **CI/CD**            | 4 workflows GitHub Actions: `ci.yml` (matrix 3 OS × 2 Python + lint + security), `docker.yml`, `release.yml`, `codeql.yml`. Sem Ollama/GPU em CI                   |
 
 ---
 

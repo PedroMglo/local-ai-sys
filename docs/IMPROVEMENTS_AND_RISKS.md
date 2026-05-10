@@ -664,6 +664,18 @@ O AST chunking só funciona para Python. Para suportar JavaScript, TypeScript, R
 
 > **Fase 8 concluída em 2026-05-10.** Pipeline CI/CD completa com GitHub Actions: testes em matrix 3 OS × 2 Python (sem Ollama/GPU/rsync), CLI smoke test cross-platform, security audit (secrets, .env, .gitignore, Docker), Docker build + compose config + health endpoint test, release workflow com GitHub Release automático. Dockerfile com user não-root (UID 1000). `_find_project_root()` com fallback CWD para containers. `ci.yml` com `workflow_call` para reutilização em `release.yml`. `make ci` para validação local completa. Cobertura: 61%.
 
+### Fase 9 — Security hardening (v0.4.1) ✅
+
+| #   | Tarefa                                                                                           | Complexidade | Estado       |
+| --- | ------------------------------------------------------------------------------------------------ | ------------ | ------------ |
+| 72  | ~~`SECURITY.md`: política de segurança profissional com modelo local-first, reporting, scope~~   | Média        | ✅ Concluído |
+| 73  | ~~`codeql.yml`: análise de segurança Python (path traversal, subprocess, credentials)~~          | Média        | ✅ Concluído |
+| 74  | ~~`dependabot.yml`: adicionar ecosystem `docker` para monitorizar `python:3.11-slim`~~           | Baixa        | ✅ Concluído |
+| 75  | ~~`Dockerfile`: `HEALTHCHECK` com Python stdlib (sem instalar curl)~~                            | Baixa        | ✅ Concluído |
+| 76  | ~~`docker-compose.yml`: bind `127.0.0.1`, api_key default `changeme`, comentários de segurança~~ | Baixa        | ✅ Concluído |
+
+> **Fase 9 concluída em 2026-05-10.** Security hardening: `SECURITY.md` com política de disclosure e modelo local-first, CodeQL para análise automática de segurança Python, Dependabot para imagens Docker, `HEALTHCHECK` no Dockerfile (Python stdlib), `docker-compose.yml` com bind local por defeito e api_key obrigatória.
+
 ---
 
 ## Regra de manutenção da documentação
