@@ -25,6 +25,21 @@ dev = [
     "ruff>=0.4",
     "types-requests>=2.31",
 ]
+qdrant = [
+    "qdrant-client>=1.9",
+]
+treesitter = [
+    "tree-sitter>=0.23",
+    "tree-sitter-javascript>=0.23",
+    "tree-sitter-typescript>=0.23",
+    "tree-sitter-java>=0.23",
+    "tree-sitter-go>=0.23",
+    "tree-sitter-rust>=0.23",
+    "tree-sitter-c>=0.23",
+    "tree-sitter-cpp>=0.23",
+    "tree-sitter-c-sharp>=0.23",
+    "tree-sitter-ruby>=0.23",
+]
 
 [project.scripts]
 rag = "obsidian_rag.cli.main:main"
@@ -61,4 +76,27 @@ omit = [
     "obsidian_rag/pipeline/sync.py",
     "obsidian_rag/pipeline/__main__.py",
     "obsidian_rag/cli/*",
+]
+
+[tool.bandit]
+exclude_dirs = [
+  ".git",
+  ".venv",
+  "venv",
+  "env",
+  "__pycache__",
+  "tests",
+  "build",
+  "dist",
+  "data",
+  "models",
+  "chroma",
+  "chromadb",
+  "qdrant_storage",
+  "storage",
+  "embeddings"
+]
+
+skips = [
+  "B101"
 ]
