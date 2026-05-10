@@ -1,0 +1,54 @@
+name: Docker — Build & Config
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-build:
+    name: Docker build & sanity check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: obsidian-rag:ci
+          push: false
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Validate docker compose config
+        run: docker compose config
+
+      - name: Verify package importable in container
+        run: |
+          docker run --rm obsidian-rag:ci python -c "
+          import obsidian_rag
+          print('obsidian_rag version:', obsidian_rag.__version__)
+          "
+
+      - name: CLI help works inside container
+        run: docker run --rm obsidian-rag:ci rag --help
+
+      - name: Check container user
+        run: |
+          USER_ID=$(docker run --rm obsidian-rag:ci id -u)
+          if [ "$USER_ID" = "0" ]; then
+            echo "WARN: Container corre como root — considera adicionar USER não-root ao Dockerfile"
+          else
+            echo "OK: Container corre como UID $USER_ID"
+          fi
