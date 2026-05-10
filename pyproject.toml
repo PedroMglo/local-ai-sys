@@ -1,6 +1,6 @@
 [project]
 name = "obsidian-rag"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local RAG pipeline — Obsidian Vault + Git repos + Graphify knowledge graph"
 requires-python = ">=3.11"
 
@@ -11,12 +11,10 @@ dependencies = [
     "httpx>=0.27",
     "networkx>=3.0",   # leitura de graph.json do Graphify
     "slowapi>=0.1.9",  # rate limiting
+    "graphifyy",       # knowledge graph (pure Python, opt-in na execução)
 ]
 
 [project.optional-dependencies]
-graphify = [
-    "graphifyy",       # pip install graphifyy (CLI graphify)
-]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -26,11 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-rag-sync = "obsidian_rag.pipeline.sync:main"
-rag-serve = "obsidian_rag.api.app:serve"
-rag-query = "obsidian_rag.api.cli:main"
-rag-chat = "obsidian_rag.api.chat_cli:main"
-rag-backup = "obsidian_rag.pipeline.backup:main"
+rag = "obsidian_rag.cli.main:main"
 
 [tool.setuptools.packages.find]
 include = ["obsidian_rag*"]
@@ -63,4 +57,5 @@ omit = [
     "obsidian_rag/api/chat_cli.py",
     "obsidian_rag/pipeline/sync.py",
     "obsidian_rag/pipeline/__main__.py",
+    "obsidian_rag/cli/*",
 ]

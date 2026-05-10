@@ -91,7 +91,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Obsidian RAG API",
     description="API local para queries semânticas ao Vault Obsidian e repositórios de código",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -133,7 +133,7 @@ async def auth_middleware(request: Request, call_next):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "obsidian-rag", "version": "0.3.0"}
+    return {"status": "ok", "service": "obsidian-rag", "version": "0.4.0"}
 
 
 @app.get("/stats", response_model=StatsResponse)
@@ -393,12 +393,26 @@ async def chat(request: Request, req: ChatRequest):
 
 
 def serve():
-    """Entry point for rag-serve."""
+    """Entry point for rag serve."""
     import uvicorn
+
+    host = settings.api.host
+    port = settings.api.port
+
+    # Security: refuse 0.0.0.0 without API key
+    if host == "0.0.0.0" and not settings.api.api_key:
+        import sys
+        print(
+            "ERRO: API exposta em 0.0.0.0 sem api_key configurada.\n"
+            "Define [api] api_key em rag.toml ou usa host = \"127.0.0.1\".",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     uvicorn.run(
         "obsidian_rag.api.app:app",
-        host=settings.api.host,
-        port=settings.api.port,
+        host=host,
+        port=port,
     )
 
 

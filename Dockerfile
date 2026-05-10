@@ -26,4 +26,4 @@ EXPOSE 8000
 ENV RAG_API_HOST=0.0.0.0
 ENV RAG_API_PORT=8000
 
-CMD ["rag-serve"]
+CMD ["rag", "serve"]

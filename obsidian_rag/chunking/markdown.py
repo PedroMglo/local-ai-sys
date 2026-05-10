@@ -148,6 +148,13 @@ def chunk_note(path: Path, source_dir: Path | None = None) -> list[Chunk]:
     return chunks
 
 
+# Directories to skip when scanning notes
+_EXCLUDED_DIRS = frozenset({
+    ".git", ".venv", "venv", "node_modules", "__pycache__",
+    ".cache", "dist", "build", ".obsidian",
+})
+
+
 def chunk_all_notes(source_dir: Path | None = None) -> list[Chunk]:
     """Processa todas as notas .md na source_dir."""
     if source_dir is None:
@@ -156,7 +163,10 @@ def chunk_all_notes(source_dir: Path | None = None) -> list[Chunk]:
     if not source_dir.exists():
         raise SystemExit(f"Pasta source não existe: {source_dir}")
 
-    files = sorted(source_dir.rglob("*.md"))
+    files = sorted(
+        f for f in source_dir.rglob("*.md")
+        if not any(part in _EXCLUDED_DIRS for part in f.relative_to(source_dir).parts)
+    )
     if not files:
         raise SystemExit("Sem ficheiros .md na pasta source.")
 
