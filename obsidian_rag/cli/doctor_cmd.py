@@ -170,6 +170,31 @@ def run_doctor() -> None:
 
     print()
 
+    # 5b. Sync
+    print("─── Sync ───")
+    try:
+        from obsidian_rag.pipeline.vault_sync import is_rsync_available, resolve_effective_backend
+        configured = settings.sync.backend
+        effective = resolve_effective_backend(configured)
+        _ok(f"Backend configurado: {configured}")
+        if configured != effective:
+            _ok(f"Backend efectivo: {effective}")
+        if configured in ("auto", "rsync"):
+            if is_rsync_available():
+                _ok("rsync disponível")
+            else:
+                _warn("rsync não disponível" + (" — fallback para python" if configured == "auto" else ""))
+                if configured == "rsync":
+                    issues += 1
+        if effective == "direct":
+            _ok("Modo directo — leitura directa do vault_dir (sem cópia)")
+        elif effective in ("python", "rsync"):
+            _ok(f"Modo cópia — vault_dir → source_dir ({effective})")
+    except Exception as e:
+        _warn(f"Verificação de sync falhou: {e}")
+
+    print()
+
     # 6. Ollama
     print("─── Ollama ───")
     base_url = settings.ollama.base_url

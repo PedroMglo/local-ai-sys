@@ -156,19 +156,35 @@ _EXCLUDED_DIRS = frozenset({
 
 
 def chunk_all_notes(source_dir: Path | None = None) -> list[Chunk]:
-    """Processa todas as notas .md na source_dir."""
+    """Processa todas as notas .md no directório indicado.
+
+    Se *source_dir* não for fornecido, usa a pasta efectiva com base
+    no backend de sync configurado:
+    - direct → vault_dir (leitura directa, sem cópia)
+    - python/rsync/auto → source_dir (cópia local)
+    """
     if source_dir is None:
-        source_dir = settings.paths.source_dir
+        if settings.sync.backend == "direct":
+            source_dir = settings.paths.vault_dir
+        else:
+            source_dir = settings.paths.source_dir
 
     if not source_dir.exists():
-        raise SystemExit(f"Pasta source não existe: {source_dir}")
+        raise SystemExit(f"Pasta de notas não existe: {source_dir}")
+
+    # Merge default excluded dirs with sync exclude_patterns
+    exclude_dirs = set(_EXCLUDED_DIRS)
+    try:
+        exclude_dirs.update(settings.sync.exclude_patterns)
+    except Exception:
+        pass
 
     files = sorted(
         f for f in source_dir.rglob("*.md")
-        if not any(part in _EXCLUDED_DIRS for part in f.relative_to(source_dir).parts)
+        if not any(part in exclude_dirs for part in f.relative_to(source_dir).parts)
     )
     if not files:
-        raise SystemExit("Sem ficheiros .md na pasta source.")
+        raise SystemExit(f"Sem ficheiros .md em: {source_dir}")
 
     all_chunks = []
     for path in files:

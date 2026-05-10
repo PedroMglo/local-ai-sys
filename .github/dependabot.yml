@@ -39,3 +39,13 @@ updates:
       time: "06:00"
       timezone: "Europe/Lisbon"
     open-pull-requests-limit: 5
+
+  # ── Docker base images ──────────────────────────────────────────────────────
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Lisbon"
+    open-pull-requests-limit: 3

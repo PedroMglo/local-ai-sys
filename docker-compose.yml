@@ -2,14 +2,18 @@ services:
   obsidian-rag:
     build: .
     ports:
-      - "8000:8000"
+      # Bind local por defeito. Para expor na LAN: "0.0.0.0:8000:8000" (requer RAG_API_KEY)
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
       - ./rag.toml:/app/rag.toml:ro
     environment:
       - RAG_OLLAMA_BASE_URL=http://host.docker.internal:11434
+      # HOST=0.0.0.0 dentro do container para ouvir na interface — a exposição real é controlada por "ports" acima
       - RAG_API_HOST=0.0.0.0
-      - RAG_API_API_KEY=${RAG_API_KEY:-}
+      - RAG_API_API_KEY=${RAG_API_KEY:-changeme}
+    # mem_limit: 2g
+    # cpus: 2
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"

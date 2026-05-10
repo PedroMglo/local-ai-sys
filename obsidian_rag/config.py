@@ -9,10 +9,14 @@ from pathlib import Path
 
 
 def _find_project_root() -> Path:
-    """Walk up from this file to find rag.toml."""
+    """Walk up from this file to find rag.toml, or check CWD."""
     current = Path(__file__).resolve().parent.parent
     if (current / "rag.toml").exists():
         return current
+    # Check current working directory (useful in containers)
+    cwd = Path.cwd()
+    if (cwd / "rag.toml").exists():
+        return cwd
     # fallback: home-based path
     return Path.home() / "ai-local" / "obsidian-rag"
 
@@ -154,6 +158,22 @@ class DebugConfig:
 
 
 @dataclass(frozen=True)
+class SyncConfig:
+    backend: str                    # "auto" | "python" | "rsync" | "direct"
+    delete_missing: bool            # remove from source_dir files deleted from vault
+    follow_symlinks: bool           # follow symlinks when scanning vault
+    exclude_patterns: tuple[str, ...]  # glob patterns to skip during sync/scan
+
+
+# Default patterns excluded from vault sync/scan
+_DEFAULT_EXCLUDE_PATTERNS = (
+    ".obsidian", ".trash", ".git", ".DS_Store", "Thumbs.db",
+    "node_modules", ".venv", "venv", "__pycache__", ".cache",
+    "dist", "build",
+)
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     max_workers: int        # max parallel workers for repo sync
 
@@ -184,6 +204,7 @@ class Settings:
     debug: DebugConfig
     pipeline: PipelineConfig
     performance: PerformanceConfig
+    sync: SyncConfig
     models: dict[str, bool] = field(default_factory=dict)
 
 
@@ -301,6 +322,18 @@ def load_settings() -> Settings:
         max_workers=_env_override("pipeline", "max_workers", pl.get("max_workers", 4)),
     )
 
+    # Sync — optional section, defaults to backend="direct" (cross-platform)
+    sy = raw.get("sync", {})
+    raw_excludes = _env_override("sync", "exclude_patterns", sy.get("exclude_patterns", list(_DEFAULT_EXCLUDE_PATTERNS)))
+    if isinstance(raw_excludes, str):
+        raw_excludes = [e.strip() for e in raw_excludes.split(",") if e.strip()]
+    sync = SyncConfig(
+        backend=_env_override("sync", "backend", sy.get("backend", "direct")),
+        delete_missing=_env_override("sync", "delete_missing", sy.get("delete_missing", True)),
+        follow_symlinks=_env_override("sync", "follow_symlinks", sy.get("follow_symlinks", False)),
+        exclude_patterns=tuple(raw_excludes),
+    )
+
     pf = raw.get("performance", {})
     performance = PerformanceConfig(
         auto_tune=_env_override("performance", "auto_tune", pf.get("auto_tune", True)),
@@ -336,6 +369,7 @@ def load_settings() -> Settings:
         debug=debug,
         pipeline=pipeline,
         performance=performance,
+        sync=sync,
         models=models,
     )
 

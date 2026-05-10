@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import secrets
 import sys
 from argparse import Namespace
@@ -10,10 +11,16 @@ from pathlib import Path
 
 from obsidian_rag.config import PROJECT_ROOT, config_exists
 
-# Paths that must never be indexed
-_DANGEROUS_PATHS = frozenset({
+_SYSTEM = platform.system()  # "Linux" | "Darwin" | "Windows"
+
+# Paths that must never be indexed — common across all OS
+_DANGEROUS_PATHS_UNIX = frozenset({
     "/", "/bin", "/boot", "/dev", "/etc", "/lib", "/proc", "/root",
     "/sbin", "/sys", "/tmp", "/usr", "/var",
+})
+
+_DANGEROUS_PATHS_MACOS = frozenset({
+    "/System", "/Library", "/Applications",
 })
 
 _SENSITIVE_SUFFIXES = frozenset({
@@ -21,25 +28,64 @@ _SENSITIVE_SUFFIXES = frozenset({
     ".config", ".mozilla", ".thunderbird",
 })
 
+# Dirs that should never be indexed regardless of OS
+_UNIVERSAL_DANGEROUS_NAMES = frozenset({
+    ".git", ".venv", "venv", "node_modules", "__pycache__",
+})
+
 
 def _is_dangerous_path(p: str) -> str | None:
     """Return an error message if path is dangerous, else None."""
     expanded = os.path.expanduser(p)
     resolved = os.path.realpath(expanded)
+    resolved_lower = resolved.lower()
+    # Check both original and resolved (symlinks like /bin → /usr/bin)
+    check_paths = {expanded, resolved}
 
-    if resolved in _DANGEROUS_PATHS:
-        return f"Path perigoso (directório de sistema): {resolved}"
-
+    # --- Universal checks ---
     home = os.path.expanduser("~")
     if resolved == home:
         return f"Path perigoso (home inteiro): {resolved} — usa um subdirectório"
 
-    if resolved == os.path.dirname(home):  # /home
-        return f"Path perigoso (/home inteiro): {resolved}"
+    basename = os.path.basename(resolved)
+    if basename in _UNIVERSAL_DANGEROUS_NAMES:
+        return f"Path perigoso (directório de desenvolvimento): {basename}"
 
+    resolved_fwd = resolved.replace("\\", "/")
     for suffix in _SENSITIVE_SUFFIXES:
-        if resolved.endswith(suffix) or f"/{suffix}/" in resolved + "/":
+        if resolved_fwd.endswith(suffix) or f"/{suffix}/" in resolved_fwd + "/":
             return f"Path sensível ({suffix}): {resolved}"
+
+    # --- OS-specific checks ---
+    if _SYSTEM == "Windows":
+        # Windows drive roots: C:\, D:\, etc.
+        if len(resolved) <= 3 and resolved.endswith((":\\", ":")):
+            return f"Path perigoso (raiz de disco): {resolved}"
+        win_dangerous = {"windows", "program files", "program files (x86)", "programdata"}
+        parts_lower = [part.lower() for part in Path(resolved).parts]
+        for d in win_dangerous:
+            if d in parts_lower:
+                return f"Path perigoso (directório de sistema Windows): {resolved}"
+        # Entire AppData
+        appdata = os.environ.get("APPDATA", "")
+        if appdata and resolved_lower == os.path.realpath(appdata).lower():
+            return f"Path perigoso (AppData inteiro): {resolved}"
+    elif _SYSTEM == "Darwin":
+        for cp in check_paths:
+            if cp in _DANGEROUS_PATHS_UNIX or cp in _DANGEROUS_PATHS_MACOS:
+                return f"Path perigoso (directório de sistema): {cp}"
+        if resolved == os.path.dirname(home):
+            return f"Path perigoso (/Users inteiro): {resolved}"
+        # ~/Library is macOS system data
+        if resolved == os.path.join(home, "Library"):
+            return f"Path perigoso (~/Library inteiro): {resolved}"
+    else:
+        # Linux / other Unix — check both original and resolved
+        for cp in check_paths:
+            if cp in _DANGEROUS_PATHS_UNIX:
+                return f"Path perigoso (directório de sistema): {cp}"
+        if resolved == os.path.dirname(home):
+            return f"Path perigoso (/home inteiro): {resolved}"
 
     return None
 
@@ -75,34 +121,103 @@ def _ask_yn(prompt: str, default: bool = True, auto_yes: bool = False) -> bool:
 
 
 def _detect_vault() -> str:
-    """Try common Obsidian vault locations."""
+    """Try common Obsidian vault locations across OS."""
+    home = Path.home()
+
+    # Try reading Obsidian's own config for known vaults
+    obsidian_config = _read_obsidian_config()
+    if obsidian_config:
+        return obsidian_config
+
+    # Common candidates per platform
     candidates = [
-        Path.home() / "Obsidian" / "Vault",
-        Path.home() / "Obsidian",
-        Path.home() / "Documents" / "Obsidian",
-        Path.home() / "Documents" / "Obsidian Vault",
+        home / "Obsidian" / "Vault",
+        home / "Obsidian",
+        home / "Documents" / "Obsidian",
+        home / "Documents" / "Obsidian Vault",
     ]
+
+    if _SYSTEM == "Darwin":
+        candidates.extend([
+            home / "Library" / "Mobile Documents" / "iCloud~md~obsidian" / "Documents",
+        ])
+    elif _SYSTEM == "Windows":
+        candidates.extend([
+            home / "OneDrive" / "Obsidian",
+            home / "OneDrive" / "Documents" / "Obsidian",
+        ])
+
     for c in candidates:
         if c.exists():
             return str(c)
-    return str(Path.home() / "Obsidian" / "Vault")
+    return str(home / "Obsidian" / "Vault")
+
+
+def _read_obsidian_config() -> str | None:
+    """Try to find vaults from Obsidian's own config file."""
+    import json
+
+    config_paths = []
+    home = Path.home()
+
+    if _SYSTEM == "Linux":
+        config_paths.append(home / ".config" / "obsidian" / "obsidian.json")
+    elif _SYSTEM == "Darwin":
+        config_paths.append(home / "Library" / "Application Support" / "obsidian" / "obsidian.json")
+    elif _SYSTEM == "Windows":
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            config_paths.append(Path(appdata) / "obsidian" / "obsidian.json")
+
+    for cfg_path in config_paths:
+        if not cfg_path.exists():
+            continue
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            vaults = data.get("vaults", {})
+            for vault_info in vaults.values():
+                vault_path: str = vault_info.get("path", "")
+                if vault_path and Path(vault_path).exists():
+                    return vault_path
+        except Exception:
+            continue
+
+    return None
 
 
 def _detect_repos() -> list[str]:
-    """Scan common dirs for git repos."""
+    """Scan common dirs for git repos across OS."""
     found = []
+    home = Path.home()
     search_dirs = [
-        Path.home() / "Projects",
-        Path.home() / "ai-local",
-        Path.home() / "repos",
-        Path.home() / "dev",
+        home / "Projects",
+        home / "repos",
+        home / "dev",
+        home / "src",
     ]
+
+    if _SYSTEM == "Linux":
+        search_dirs.extend([
+            home / "ai-local",
+        ])
+    elif _SYSTEM == "Darwin":
+        search_dirs.extend([
+            home / "Developer",
+        ])
+    elif _SYSTEM == "Windows":
+        search_dirs.extend([
+            home / "source" / "repos",  # Visual Studio default
+        ])
+
     for d in search_dirs:
         if not d.exists():
             continue
-        for child in sorted(d.iterdir()):
-            if child.is_dir() and (child / ".git").exists():
-                found.append(str(child))
+        try:
+            for child in sorted(d.iterdir()):
+                if child.is_dir() and (child / ".git").exists():
+                    found.append(str(child))
+        except PermissionError:
+            continue
     return found[:10]  # cap
 
 
@@ -136,6 +251,7 @@ def _generate_toml(
     models: dict[str, bool],
     host: str,
     api_key: str,
+    sync_backend: str = "direct",
 ) -> str:
     """Generate rag.toml content with the current schema."""
     repo_paths = ", ".join(f'"{r}"' for r in repos)
@@ -147,9 +263,19 @@ def _generate_toml(
 # Ex: RAG_RETRIEVAL_TOP_K=15 sobrepõe [retrieval] top_k
 
 [paths]
-source_dir = "source"
+source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
 data_dir = "data/chroma"
-vault_dir = "{vault_dir}"
+vault_dir = "{vault_dir}"       # fonte principal dos dados Obsidian
+
+[sync]
+# Backend de sincronização do Vault:
+#   direct — lê directamente de vault_dir (default, cross-platform, sem cópia)
+#   python — copia vault_dir → source_dir com shutil (cross-platform, incremental)
+#   rsync  — usa rsync para copiar (Linux/macOS, mais rápido para vaults grandes)
+#   auto   — rsync se disponível, senão python
+backend = "{sync_backend}"
+delete_missing = true           # remover de source_dir ficheiros apagados do vault
+follow_symlinks = false
 
 [ollama]
 base_url = "{ollama_url}"
@@ -330,6 +456,22 @@ def run_init(args: Namespace) -> None:
             print("  Guarda esta chave! Necessária para aceder à API.")
     print()
 
+    # --- Sync backend ---
+    print("─── Sync ───")
+    sync_backend = "direct"
+    if not auto:
+        print("  Modos de sincronização do Vault:")
+        print("    direct — lê directamente do Vault (recomendado, zero cópias)")
+        print("    auto   — usa rsync se disponível, senão copia com Python")
+        print("    python — copia para pasta local com Python (cross-platform)")
+        print("    rsync  — usa rsync (Linux/macOS)")
+        chosen = _ask("Backend de sync", default="direct")
+        if chosen in ("direct", "auto", "python", "rsync"):
+            sync_backend = chosen
+        else:
+            print(f"  ⚠ Backend '{chosen}' inválido — a usar 'direct'")
+    print()
+
     # --- Generate ---
     toml_content = _generate_toml(
         vault_dir=vault_dir,
@@ -338,6 +480,7 @@ def run_init(args: Namespace) -> None:
         models=models,
         host=host,
         api_key=api_key,
+        sync_backend=sync_backend,
     )
 
     toml_path = PROJECT_ROOT / "rag.toml"
@@ -345,9 +488,12 @@ def run_init(args: Namespace) -> None:
     print(f"✓ Configuração escrita em {toml_path}")
 
     # --- Create directories ---
-    for d in ["data/chroma", "data/graphify", "source"]:
+    dirs_to_create = ["data/chroma", "data/graphify"]
+    if sync_backend != "direct":
+        dirs_to_create.append("source")
+    for d in dirs_to_create:
         (PROJECT_ROOT / d).mkdir(parents=True, exist_ok=True)
-    print("✓ Directórios criados (data/chroma, data/graphify, source)")
+    print(f"✓ Directórios criados ({', '.join(dirs_to_create)})")
 
     print()
     print("Próximos passos:")

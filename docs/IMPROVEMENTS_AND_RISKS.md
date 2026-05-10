@@ -33,7 +33,7 @@
 | **Complexidade**       | Média                                                                 |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`                                            |
 
-**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama, ChromaDB). Total atual: 184 testes em 13 ficheiros. Faltam integration tests e2e com Ollama.
+**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama, ChromaDB). Total atual: 226 testes em 14 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security). Faltam integration tests e2e com Ollama.
 
 ### 1.2 ~~Singletons mutáveis para coleções ChromaDB~~ ✅ RESOLVIDO
 
@@ -153,7 +153,13 @@ O `rag.py` importa diretamente funções do `chroma.py`. Não existe abstração
 | **Complexidade**       | Média                                           |
 | **Ficheiros afetados** | `.github/workflows/ci.yml`                      |
 
-**Resolução (2026-05-10):** Criado `.github/workflows/ci.yml` com dois jobs: `lint` (ruff check + mypy) e `test` (pytest + coverage --fail-under=50). Triggers: push/PR na branch main.
+**Resolução (2026-05-10):** Pipeline CI/CD completa com 3 workflows GitHub Actions:
+
+- **`ci.yml`** — 5 jobs: lint (ruff + mypy), test matrix (ubuntu/macos/windows × Python 3.11/3.12 com pytest-cov --fail-under=30), CLI smoke (3 OS), config & vault_sync tests, security audit (secrets, .env, .gitignore, Docker host binding)
+- **`docker.yml`** — Docker build com Buildx cache, compose config, sanity check (import + CLI no container)
+- **`release.yml`** — Trigger em tags `v*`, reutiliza CI, build wheel/sdist, GitHub Release automático, Docker image build
+
+Triggers: push/PR na branch main. Sem dependências de Ollama, GPU, rsync ou systemd. `Makefile` com targets `lint`, `typecheck`, `test-cov`, `ci`, `docker-build`, `docker-check`. `pyproject.toml` com `pytest-cov>=5.0` e `types-requests>=2.31` nas dev extras.
 
 ### 3.4 ~~Versão hardcoded em múltiplos locais~~ ✅ RESOLVIDO
 
@@ -250,16 +256,16 @@ O `rag.py` importa diretamente funções do `chroma.py`. Não existe abstração
 
 **Resolução (2026-05-10):** Adicionadas validações `min_length`/`max_length` a todos os campos string dos modelos Pydantic: `QueryRequest.query` (1–10000), `ChatMessage.role` (max 20), `ChatMessage.content` (max 50000), `ChatRequest.messages` (max 200 msgs), `ChatRequest.model` (max 100). Pydantic retorna HTTP 422 automaticamente.
 
-### 5.4 ~~Subprocess sem sanitização de paths~~ ✅ PARCIALMENTE RESOLVIDO
+### 5.4 ~~Subprocess sem sanitização de paths~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                         |
 | ---------------------- | --------------------------------------------------------------- |
-| **Prioridade**         | ~~Baixa~~ — Parcialmente resolvido                              |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                           |
 | **Impacto**            | Baixo — os paths vêm de `rag.toml`, controlado pelo utilizador  |
 | **Complexidade**       | Baixa                                                           |
 | **Ficheiros afetados** | `obsidian_rag/graph/builder.py`, `obsidian_rag/cli/init_cmd.py` |
 
-**Melhoria (v0.4.0):** `rag init` agora valida paths contra locações perigosas (`/`, `~`, `.ssh`, `.gnupg`, `.cache`, `.local/share/Trash`, directorias de sistema). Paths em `rag.toml` passam por validação antes de serem escritos. Os paths em `builder.py` continuam sem validação runtime (risco baixo pois vêm de `rag.toml`).
+**Resolução (v0.4.0 + v0.4.1):** `rag init` agora valida paths contra locações perigosas com lógica cross-platform: raízes de disco Windows (`C:\`), dirs de sistema Windows (`Program Files`, `ProgramData`), dirs macOS (`/System`, `/Library`, `~/Library`), dirs Linux (`/bin`, `/usr`, etc.) com resolução de symlinks via `os.path.realpath()`. Paths iCloud (macOS) e OneDrive (Windows) são detectados como candidatos válidos para vaults. Os paths em `builder.py` continuam sem validação runtime (risco baixo pois vêm de `rag.toml`).
 
 ### 5.5 ChromaDB telemetria desativada mas sem validação — ⏸️ DEFERRED
 
@@ -302,9 +308,7 @@ O projeto é 100% local: Ollama local, ChromaDB local, sem APIs externas. Este �
 | **Complexidade**       | Baixa                                         |
 | **Ficheiros afetados** | `source/`, `.gitignore`                       |
 
-**Resolução (2026-05-10):** Adicionado `source/` ao `.gitignore` para prevenir commits acidentais de dados pessoais do vault.
-
-A pasta `source/` contém uma cópia (rsync) das notas Obsidian. Se o repositório for partilhado, dados pessoais podem ser expostos. O `.gitignore` deve excluir `source/` e `data/`.
+**Resolução (2026-05-10 + v0.4.1):** Adicionado `source/` ao `.gitignore` para prevenir commits acidentais de dados pessoais do vault. Desde v0.4.1, o backend `direct` (default) lê o vault in-place sem criar cópia em `source/`, eliminando a duplicação por defeito. A pasta `source/` só é usada quando o backend é `python` ou `rsync`.
 
 ---
 
@@ -409,7 +413,7 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | **Complexidade**       | Média                                  |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`             |
 
-**Resolução (2026-05-10):** 184 testes implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation, bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout e integration tests com TestClient + ChromaDB in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
+**Resolução (2026-05-10):** 226 testes implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority + 42 vault_sync/cross-platform). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation (cross-platform), bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout, vault_sync backends (direct/python/rsync/auto), exclude patterns, incremental copy, delete_missing e integration tests com TestClient + ChromaDB in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
 
 ### 10.2 ~~Autenticação da API~~ ✅ RESOLVIDO
 
@@ -557,7 +561,7 @@ O AST chunking só funciona para Python. Para suportar JavaScript, TypeScript, R
 | D2  | ~~Backup ChromaDB com rotação~~                           | Baixa        | ✅ Concluído |
 | D3  | ~~Containerização Docker~~                                | Baixa        | ✅ Concluído |
 
-> **Fase 2 concluída em 2026-05-10.** Todas as tarefas de média prioridade foram implementadas. 157 testes passam sem deps externas.
+> **Fase 2 concluída em 2026-05-10.** Todas as tarefas de média prioridade foram implementadas. 226 testes passam sem deps externas.
 
 ### Fase 3 — Evolução (Baixa prioridade)
 
@@ -585,7 +589,7 @@ O AST chunking só funciona para Python. Para suportar JavaScript, TypeScript, R
 | 25  | ~~Graphify como dep obrigatória (opt-in na execução)~~                      | Baixa        | ✅ Concluído |
 | 26  | ~~`install.sh` + `Makefile`~~                                               | Baixa        | ✅ Concluído |
 | 27  | ~~Segurança: bind validation, path validation, \_EXCLUDED_DIRS~~            | Média        | ✅ Concluído |
-| 28  | ~~Testes CLI + init + security + performance + adaptive top_k (157 total)~~ | Média        | ✅ Concluído |
+| 28  | ~~Testes CLI + init + security + performance + adaptive top_k (226 total)~~ | Média        | ✅ Concluído |
 
 > **Fase 4 concluída em 2026-05-10.** Major DX refactoring (v0.4.0): CLI unificado, wizard de setup, diagnóstico, pre-flight checks, config lazy loading, melhorias de segurança.
 
@@ -601,7 +605,7 @@ O AST chunking só funciona para Python. Para suportar JavaScript, TypeScript, R
 | 34  | ~~`rag doctor`: secções Recursos e Performance~~                 | Baixa        | ✅ Concluído |
 | 35  | ~~Dependência `psutil>=5.9`~~                                    | Baixa        | ✅ Concluído |
 | 36  | ~~Embedding batch size configurável via `[performance]`~~        | Baixa        | ✅ Concluído |
-| 37  | ~~26 novos testes (performance + adaptive top_k) — 157 total~~   | Média        | ✅ Concluído |
+| 37  | ~~26 novos testes (performance + adaptive top_k) — 226 total~~   | Média        | ✅ Concluído |
 
 > **Fase 5 concluída em 2026-05-10.** Auto-tuning de recursos, adaptive top_k, proteção de recursos no sync, verificação de disco, nova dependência `psutil`.
 
@@ -621,9 +625,56 @@ O AST chunking só funciona para Python. Para suportar JavaScript, TypeScript, R
 | 47  | ~~Router timeout via `settings.performance.query_timeout_seconds`~~ | Baixa        | ✅ Concluído |
 | 48  | ~~Graphify subprocess com `logging` em vez de `print()`~~           | Baixa        | ✅ Concluído |
 | 49  | ~~Reranker habilitado por defeito + LRU cache em `_score_chunk()`~~ | Baixa        | ✅ Concluído |
-| 50  | ~~27 novos testes (`test_low_priority.py`) — 184 total~~            | Média        | ✅ Concluído |
+| 50  | ~~27 novos testes (`test_low_priority.py`) — 226 total~~            | Média        | ✅ Concluído |
 
 > **Fase 6 concluída em 2026-05-10.** Polimento de baixa prioridade: thread safety, normalização Unicode, stop words bilíngues, `__all__` exports, timeouts configuráveis, reranker com cache LRU, logging estruturado em subprocess. Deferred para Fase C: §1.3 (vector store interface), §10.8 (tree-sitter chunking), §8.1/§8.2 (escalabilidade).
+
+### Fase 7 — Cross-platform e sync refactoring (v0.4.1) ✅
+
+| #   | Tarefa                                                                                         | Complexidade | Estado       |
+| --- | ---------------------------------------------------------------------------------------------- | ------------ | ------------ |
+| 51  | ~~`vault_sync.py` — 4 backends de sync (direct, python, rsync, auto)~~                         | Média        | ✅ Concluído |
+| 52  | ~~Secção `[sync]` em `rag.toml`: backend, delete_missing, follow_symlinks, exclude~~           | Baixa        | ✅ Concluído |
+| 53  | ~~Default backend `direct` — sem dependência de rsync, cross-platform~~                        | Baixa        | ✅ Concluído |
+| 54  | ~~Detecção cross-platform de vault/repos em `rag init` (obsidian.json, iCloud, OneDrive)~~     | Média        | ✅ Concluído |
+| 55  | ~~Path validation cross-platform (Windows drives, macOS /System, Linux /bin + symlinks)~~      | Média        | ✅ Concluído |
+| 56  | ~~`install.ps1` — instalador nativo Windows (PowerShell)~~                                     | Baixa        | ✅ Concluído |
+| 57  | ~~`rag schedule install/remove/status` — scheduler cross-platform (systemd/launchd/schtasks)~~ | Média        | ✅ Concluído |
+| 58  | ~~Default exclude patterns (.obsidian, .trash, .git, .DS_Store, Thumbs.db, etc.)~~             | Baixa        | ✅ Concluído |
+| 59  | ~~`rag doctor` — mostra sync backend info~~                                                    | Baixa        | ✅ Concluído |
+| 60  | ~~42 novos testes (`test_vault_sync.py` + cross-platform security) — 226 total~~               | Média        | ✅ Concluído |
+
+> **Fase 7 concluída em 2026-05-10.** Major cross-platform refactoring: sync vault com 4 backends configuráveis (default `direct` elimina dependência de rsync), detecção automática de vault Obsidian via ficheiro de configuração nativo, validação de paths cross-platform com resolução de symlinks, `install.ps1` para Windows, scheduler cross-platform via `rag schedule`, e 42 novos testes. O projeto suporta agora Linux, macOS e Windows nativamente.
+
+### Fase 8 — CI/CD pipeline completa (v0.4.1) ✅
+
+| #   | Tarefa                                                                                                   | Complexidade | Estado       |
+| --- | -------------------------------------------------------------------------------------------------------- | ------------ | ------------ |
+| 61  | ~~`ci.yml`: lint (ruff + mypy), test matrix (3 OS × 2 Python), CLI smoke, config tests, security audit~~ | Alta         | ✅ Concluído |
+| 62  | ~~`docker.yml`: Docker build com Buildx cache, compose config, sanity check~~                            | Média        | ✅ Concluído |
+| 63  | ~~`release.yml`: CI → build wheel/sdist → GitHub Release → Docker image~~                                | Média        | ✅ Concluído |
+| 64  | ~~`pyproject.toml`: adicionar `pytest-cov>=5.0`, `types-requests>=2.31` a dev extras~~                   | Baixa        | ✅ Concluído |
+| 65  | ~~`Makefile`: targets `lint`, `typecheck`, `test-cov`, `ci`, `docker-build`, `docker-check`~~            | Baixa        | ✅ Concluído |
+| 66  | ~~README: secção CI/CD com matriz de plataformas e comandos locais~~                                     | Baixa        | ✅ Concluído |
+| 67  | ~~Corrigir 3 erros ruff existentes (f-string, import sort, unused import)~~                              | Baixa        | ✅ Concluído |
+| 68  | ~~Dockerfile: user não-root `rag` (UID 1000) com `chown` do `/app/data`~~                                | Baixa        | ✅ Concluído |
+| 69  | ~~`ci.yml`: adicionar `workflow_call:` para reutilização em `release.yml`~~                              | Baixa        | ✅ Concluído |
+| 70  | ~~`docker.yml`: health endpoint test real (`/health` sem Ollama, api_key=ci-test-key)~~                  | Média        | ✅ Concluído |
+| 71  | ~~`config.py`: `_find_project_root()` com fallback CWD para funcionar em containers~~                    | Baixa        | ✅ Concluído |
+
+> **Fase 8 concluída em 2026-05-10.** Pipeline CI/CD completa com GitHub Actions: testes em matrix 3 OS × 2 Python (sem Ollama/GPU/rsync), CLI smoke test cross-platform, security audit (secrets, .env, .gitignore, Docker), Docker build + compose config + health endpoint test, release workflow com GitHub Release automático. Dockerfile com user não-root (UID 1000). `_find_project_root()` com fallback CWD para containers. `ci.yml` com `workflow_call` para reutilização em `release.yml`. `make ci` para validação local completa. Cobertura: 61%.
+
+### Fase 9 — Security hardening (v0.4.1) ✅
+
+| #   | Tarefa                                                                                           | Complexidade | Estado       |
+| --- | ------------------------------------------------------------------------------------------------ | ------------ | ------------ |
+| 72  | ~~`SECURITY.md`: política de segurança profissional com modelo local-first, reporting, scope~~   | Média        | ✅ Concluído |
+| 73  | ~~`codeql.yml`: análise de segurança Python (path traversal, subprocess, credentials)~~          | Média        | ✅ Concluído |
+| 74  | ~~`dependabot.yml`: adicionar ecosystem `docker` para monitorizar `python:3.11-slim`~~           | Baixa        | ✅ Concluído |
+| 75  | ~~`Dockerfile`: `HEALTHCHECK` com Python stdlib (sem instalar curl)~~                            | Baixa        | ✅ Concluído |
+| 76  | ~~`docker-compose.yml`: bind `127.0.0.1`, api_key default `changeme`, comentários de segurança~~ | Baixa        | ✅ Concluído |
+
+> **Fase 9 concluída em 2026-05-10.** Security hardening: `SECURITY.md` com política de disclosure e modelo local-first, CodeQL para análise automática de segurança Python, Dependabot para imagens Docker, `HEALTHCHECK` no Dockerfile (Python stdlib), `docker-compose.yml` com bind local por defeito e api_key obrigatória.
 
 ---
 
