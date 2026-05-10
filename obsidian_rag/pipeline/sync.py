@@ -21,6 +21,7 @@ from obsidian_rag.chunking.code import chunk_repo
 from obsidian_rag.chunking.markdown import chunk_all_notes
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import clear_embed_cache
+from obsidian_rag.pipeline.vault_sync import sync_vault
 from obsidian_rag.store.chroma import get_client, get_collection, sync_repo_to_chroma, sync_to_chroma
 
 # ---------------------------------------------------------------------------
@@ -28,10 +29,24 @@ from obsidian_rag.store.chroma import get_client, get_collection, sync_repo_to_c
 # ---------------------------------------------------------------------------
 
 def sync_notes() -> None:
-    """Sincroniza notas Obsidian → ChromaDB (coleção obsidian_vault)."""
+    """Sincroniza notas Obsidian → ChromaDB (coleção obsidian_vault).
+
+    1. Sync vault → source (or read vault directly, depending on backend)
+    2. Chunk all .md files
+    3. Embed and store in ChromaDB
+    """
     clear_embed_cache()
+
+    # Step 1: resolve effective notes directory via sync backend
+    effective_dir = sync_vault(
+        vault_dir=settings.paths.vault_dir,
+        source_dir=settings.paths.source_dir,
+        cfg=settings.sync,
+    )
+
+    # Step 2: chunk
     print("==> [Notas] A fazer chunking das notas Obsidian...")
-    chunks = chunk_all_notes()
+    chunks = chunk_all_notes(source_dir=effective_dir)
     print(f"    Total de chunks: {len(chunks)}")
 
     print("==> [Notas] A sincronizar com ChromaDB (obsidian_vault)...")
