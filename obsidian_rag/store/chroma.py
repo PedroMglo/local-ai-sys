@@ -5,10 +5,9 @@ import time
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
-from obsidian_rag.config import settings
 from obsidian_rag.chunking.markdown import Chunk
+from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import embed_texts
-
 
 BATCH_SIZE = 50
 

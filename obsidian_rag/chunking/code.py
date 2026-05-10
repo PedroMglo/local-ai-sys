@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import textwrap
 from pathlib import Path
 
 from obsidian_rag.chunking.markdown import Chunk, chunk_note
@@ -34,8 +33,8 @@ def _compute_hash(text: str) -> str:
 def _source_lines(source: str, node: ast.AST) -> str:
     """Extrai linhas de código para um nó AST."""
     lines = source.splitlines()
-    start = node.lineno - 1
-    end = getattr(node, "end_lineno", node.lineno)
+    start = getattr(node, "lineno", 1) - 1
+    end = getattr(node, "end_lineno", getattr(node, "lineno", 1))
     return "\n".join(lines[start:end])
 
 
@@ -107,8 +106,8 @@ def _chunk_python_source(
     for node in top_level_nodes:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
-        start = node.lineno - 1
-        end = getattr(node, "end_lineno", node.lineno)
+        start = getattr(node, "lineno", 1) - 1
+        end = getattr(node, "end_lineno", getattr(node, "lineno", 1))
         module_lines.extend(lines[start:end])
 
     module_text = "\n".join(module_lines).strip()
@@ -244,13 +243,13 @@ def _split_if_long(text: str, max_chars: int, overlap_chars: int) -> list[str]:
             # overlap: manter últimas linhas
             overlap_chars_left = overlap_chars
             overlap_lines: list[str] = []
-            for l in reversed(current):
+            for ln in reversed(current):
                 if overlap_chars_left <= 0:
                     break
-                overlap_lines.insert(0, l)
-                overlap_chars_left -= len(l)
+                overlap_lines.insert(0, ln)
+                overlap_chars_left -= len(ln)
             current = overlap_lines
-            current_len = sum(len(l) for l in current)
+            current_len = sum(len(ln) for ln in current)
         current.append(line)
         current_len += len(line)
     if current:

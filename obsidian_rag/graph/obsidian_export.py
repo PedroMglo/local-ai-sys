@@ -25,7 +25,6 @@ from typing import Any
 
 from obsidian_rag.config import settings
 
-
 # ---------------------------------------------------------------------------
 # Vault init
 # ---------------------------------------------------------------------------
@@ -48,15 +47,16 @@ def init_vault(vault_dir: Path) -> None:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _load_json(path: Path) -> dict:
+def _load_json(path: Path) -> dict:  # type: ignore[type-arg]
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+        return dict(data)
 
 
-def _node_label(node_id: str, nodes_by_id: dict[str, dict]) -> str:
+def _node_label(node_id: str, nodes_by_id: dict[str, dict]) -> str:  # type: ignore[type-arg]
     """Devolve o label legível de um node_id."""
     n = nodes_by_id.get(node_id, {})
-    return n.get("label", node_id)
+    return str(n.get("label", node_id))
 
 
 def _safe_wikilink(text: str) -> str:
@@ -323,7 +323,6 @@ def _write_god_node_notes(
 
     nodes_by_id = {n["id"]: n for n in graph_data.get("nodes", [])}
     links = graph_data.get("links", [])
-    communities = analysis.get("communities", {})
 
     # Build adjacency
     neighbors: dict[str, list[dict]] = {}
@@ -363,7 +362,7 @@ def _write_god_node_notes(
             f"source_file: {_yaml_str(src_file)}",
             f"degree: {degree}",
             f"community: {community}",
-            f"tags: [god-node]",
+            "tags: [god-node]",
             "---",
             "",
             f"# `{label}`",
@@ -378,7 +377,6 @@ def _write_god_node_notes(
             lines += ["## Chamadas / Dependências (outgoing)", ""]
             for nb in outgoing[:15]:
                 nb_label = nodes_by_id.get(nb["id"], {}).get("label", nb["id"])
-                nb_safe = _safe_wikilink(nb_label)
                 rel = nb["relation"]
                 lines.append(f"- `{nb_label}` ← {rel}")
             lines.append("")
@@ -476,10 +474,10 @@ def export_repo(
     Retorna dict com stats para o index.
     """
     from obsidian_rag.graph.enrich import (
-        summarize_communities,
         detect_cross_community_links,
         generate_community_mermaid,
         infer_repo_tags,
+        summarize_communities,
     )
 
     repo_dir = vault_dir / repo_name
@@ -497,7 +495,7 @@ def export_repo(
 
     # --- Enrichments ---
     cache_dir = graph_path.parent
-    print(f"    [Enrich] A enriquecer comunidades...")
+    print("    [Enrich] A enriquecer comunidades...")
 
     # 1. Community summaries (LLM)
     summaries = summarize_communities(

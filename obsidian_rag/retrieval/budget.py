@@ -81,7 +81,7 @@ def truncate_chunks(
     Corta por chunks inteiros (nunca mid-chunk). Chunks já devem
     estar ordenados por score descendente.
     """
-    result = []
+    result: list[tuple[str, dict, float]] = []
     used = 0
     for doc, meta, score in chunks:
         display = meta.get("display_text", doc)

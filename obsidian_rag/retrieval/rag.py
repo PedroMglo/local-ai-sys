@@ -8,9 +8,9 @@ import logging
 
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import get_query_embedding
-from obsidian_rag.prompts.templates import get_context_instruction, FALLBACK_WEAK_CONTEXT
+from obsidian_rag.prompts.templates import get_context_instruction
 from obsidian_rag.retrieval.budget import allocate_budget, truncate_chunks, truncate_text
-from obsidian_rag.retrieval.intent import detect_intent, detect_intent_full
+from obsidian_rag.retrieval.intent import detect_intent_full
 from obsidian_rag.retrieval.observe import QueryTrace
 from obsidian_rag.retrieval.router import ContextMode
 from obsidian_rag.store.chroma import get_client, get_collection
@@ -84,10 +84,10 @@ def _is_navigation_chunk(meta: dict, doc: str) -> bool:
     section = meta.get("section_header", "")
     if section in _NAVIGATION_SECTIONS:
         return True
-    lines = [l.strip() for l in doc.strip().splitlines() if l.strip()]
+    lines = [ln.strip() for ln in doc.strip().splitlines() if ln.strip()]
     if not lines:
         return True
-    link_count = sum(1 for l in lines if "[[" in l and "]]" in l and len(l) < 80)
+    link_count = sum(1 for ln in lines if "[[" in ln and "]]" in ln and len(ln) < 80)
     return link_count / len(lines) > 0.6
 
 
@@ -319,8 +319,8 @@ def build_rag_context(
     # Graph-only mode (no code chunks needed)
     if intent.use_graph and not code_relevant and not intent.use_code:
         try:
-            from obsidian_rag.retrieval.graph_context import build_graph_context
             from obsidian_rag.graph.cache import graph_cache
+            from obsidian_rag.retrieval.graph_context import build_graph_context
 
             synthetic_chunks: list[tuple[str, dict, float]] = []
             for repo_name in graph_cache.list_graph_repos():

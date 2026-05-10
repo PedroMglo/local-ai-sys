@@ -8,7 +8,6 @@ Usage:
 """
 
 import argparse
-import json
 import sys
 
 import httpx
@@ -76,7 +75,7 @@ def main():
                 sources = data.get("sources_used", resp.headers.get("X-Sources-Used", "none"))
                 debug = data.get("debug", {})
 
-                print(f"\n── Debug ──")
+                print("\n── Debug ──")
                 print(f"  Route: {route_mode}")
                 if debug:
                     print(f"  Reason: {debug.get('route_reason', '?')}")
@@ -90,7 +89,7 @@ def main():
                         print(f"  Rejected: {debug['context_rejected_reason']}")
                     print(f"  Time: {debug.get('total_ms', 0):.0f}ms")
                 print(f"  Sources: {sources}")
-                print(f"────────────")
+                print("────────────")
 
             # Extract response
             content = data.get("message", {}).get("content", "")

@@ -114,7 +114,7 @@ class QueryTrace:
     def format_debug_output(self) -> str:
         """Human-readable debug output for terminal."""
         lines = [
-            f"── Pipeline Debug ──",
+            "── Pipeline Debug ──",
             f"  Route:      {self.route_mode} (confidence={self.route_confidence:.1f}, method={self.route_method})",
             f"  Reason:     {self.route_reason}",
         ]
@@ -136,7 +136,7 @@ class QueryTrace:
                 lines.append(f"  Code src:   {', '.join(self.code_sources[:3])}")
         lines.append(f"  Sources:    {self.sources_used}")
         lines.append(f"  Time:       {self.total_ms:.0f}ms")
-        lines.append(f"──────────────────")
+        lines.append("──────────────────")
         return "\n".join(lines)
 
 

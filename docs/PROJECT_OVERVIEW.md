@@ -119,7 +119,9 @@ obsidian-rag/
 │   ├── test_budget.py          # Testes de alocação de token budget
 │   ├── test_chunking_code.py   # Testes de chunking Python (AST)
 │   ├── test_chunking_markdown.py # Testes de chunking Markdown
-│   └── test_router.py          # Testes de heurística do router
+│   ├── test_router.py          # Testes de heurística do router
+│   ├── test_medium_features.py # Backup, logging JSON, config, tokenizer
+│   └── test_integration.py     # Integration tests: endpoints + ChromaDB in-memory
 ├── .github/
 │   ├── agents/                 # Agentes VS Code Copilot
 │   │   └── doc-reviewer.agent.md
@@ -560,7 +562,7 @@ pytest tests/test_chunking_markdown.py
 pytest tests/test_api.py -v
 ```
 
-**91 testes** em 6 ficheiros, sem dependências externas (Ollama, ChromaDB):
+**107 testes** em 7 ficheiros, sem dependências externas (Ollama, ChromaDB):
 
 | Ficheiro                    | Testes | Cobertura                                                                                          |
 | --------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
@@ -570,20 +572,21 @@ pytest tests/test_api.py -v
 | `test_budget.py`            | 16     | `estimate_tokens`, `allocate_budget`, `truncate_chunks`, `truncate_text`                           |
 | `test_api.py`               | 7      | `/health`, middleware de auth (401 missing/wrong key, pass com key correcta)                       |
 | `test_medium_features.py`   | 25     | Backup, sync paralelo, logging JSON, tokenizer regex, configurações pipeline/debug                 |
+| `test_integration.py`       | 16     | `/query`, `/query/code`, `/stats` com ChromaDB in-memory, validação Pydantic (422)                 |
 
 Fixtures partilhadas em `conftest.py`: `tmp_source_dir`, `sample_markdown_note`, `navigation_note`, `sample_python_source`.
 
 ## Limitações conhecidas
 
-| Limitação                         | Descrição                                                                                                    |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Cobertura de testes parcial**   | 91 unit tests cobrindo chunking, router, budget, API auth e funcionalidades médias. Faltam integration tests |
-| **Chunking AST só para Python**   | Repositórios com outras linguagens usam fallback textual (menos preciso)                                     |
-| **Reranker disabled por defeito** | Adicionaria latência mas melhoraria precisão. Desativado por performance                                     |
-| **Auth opcional na API**          | API key auth disponível (`Bearer`) mas desativada por defeito (campo `api_key` vazio)                        |
-| **Graphify depende de LLM**       | A extração semântica de grafos requer chamadas ao Ollama, que pode ser lento                                 |
-| **Single-user**                   | A arquitetura não suporta múltiplos utilizadores concorrentes de forma otimizada                             |
-| **Stop words apenas em PT**       | A lista de stop words para keyword search é apenas em português                                              |
+| Limitação                         | Descrição                                                                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Cobertura de testes parcial**   | 107 testes (unit + integration) cobrindo chunking, router, budget, API auth, endpoints com ChromaDB in-memory. Faltam e2e tests com Ollama |
+| **Chunking AST só para Python**   | Repositórios com outras linguagens usam fallback textual (menos preciso)                                                                   |
+| **Reranker disabled por defeito** | Adicionaria latência mas melhoraria precisão. Desativado por performance                                                                   |
+| **Auth opcional na API**          | API key auth disponível (`Bearer`) mas desativada por defeito (campo `api_key` vazio)                                                      |
+| **Graphify depende de LLM**       | A extração semântica de grafos requer chamadas ao Ollama, que pode ser lento                                                               |
+| **Single-user**                   | A arquitetura não suporta múltiplos utilizadores concorrentes de forma otimizada                                                           |
+| **Stop words apenas em PT**       | A lista de stop words para keyword search é apenas em português                                                                            |
 
 ## Estado atual do projeto
 
@@ -601,7 +604,7 @@ Fixtures partilhadas em `conftest.py`: `tmp_source_dir`, `sample_markdown_note`,
 | **Backup**           | `rag-backup` — backup timestamped do ChromaDB com rotação automática (3 cópias)                                |
 | **Docker**           | `Dockerfile` multi-stage + `docker-compose.yml`. Porta 8000, volume `data/`, rede host Ollama                  |
 | **Documentação**     | Este ficheiro + `IMPROVEMENTS_AND_RISKS.md`                                                                    |
-| **Testes**           | 91 unit tests (pytest) — chunking, router, budget, API auth, medium features. Todos passam em <1s              |
+| **Testes**           | 107 testes (91 unit + 16 integration) com pytest. Todos passam em <1s sem deps externas                        |
 
 ---
 

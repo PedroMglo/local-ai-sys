@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from obsidian_rag.config import settings
@@ -63,11 +62,11 @@ def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
     # force=True: apagar manifest para trigger rebuild completo (AST + LLM)
     if force and manifest_json.exists():
         manifest_json.unlink()
-        print(f"    [Graphify] Manifest removido — rebuild completo forçado.")
+        print("    [Graphify] Manifest removido — rebuild completo forçado.")
 
     if graph_json.exists() and not force and not settings.graphify.auto_update:
         print(f"    [Graphify] Grafo já existe para '{repo_path.name}' e auto_update=false — skipping.")
-        print(f"    Para forçar rebuild completo: rag-sync -g --force")
+        print("    Para forçar rebuild completo: rag-sync -g --force")
         return True
 
     mode = "rebuild completo" if force else ("incremental" if manifest_json.exists() else "build inicial")
@@ -94,7 +93,7 @@ def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
         env.setdefault("OLLAMA_API_KEY", "ollama")
 
     try:
-        result = subprocess.run(
+        subprocess.run(
             cmd,
             cwd=str(repo_path),
             env=env,

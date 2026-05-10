@@ -4,34 +4,32 @@ import json as _json
 import secrets
 import time
 from contextlib import asynccontextmanager
-from typing import Any
 
+import httpx as _httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-import httpx as _httpx
 
+from obsidian_rag.api.schemas import (
+    ChatMessage,
+    ChatRequest,
+    ChunkResult,
+    CodeQueryRequest,
+    GraphNeighborsResponse,
+    GraphQueryRequest,
+    QueryRequest,
+    QueryResponse,
+    RepoInfo,
+    ReposResponse,
+    StatsResponse,
+)
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import get_query_embedding
-from obsidian_rag.prompts.templates import SYSTEM_GENERAL, FALLBACK_WEAK_CONTEXT
+from obsidian_rag.prompts.templates import SYSTEM_GENERAL
 from obsidian_rag.retrieval.observe import QueryTrace, setup_logging
-from obsidian_rag.store.chroma import get_client, get_collection
-from obsidian_rag.retrieval.rag import build_rag_context, should_use_rag, _get_collection, _get_code_collection
-from obsidian_rag.api.schemas import (
-    QueryRequest,
-    CodeQueryRequest,
-    QueryResponse,
-    ChunkResult,
-    StatsResponse,
-    ReposResponse,
-    RepoInfo,
-    GraphQueryRequest,
-    GraphNeighborsResponse,
-    ChatRequest,
-    ChatMessage,
-)
+from obsidian_rag.retrieval.rag import _get_code_collection, _get_collection, build_rag_context, should_use_rag
 
 # === Globals ===
 _http_pool: _httpx.AsyncClient | None = None
@@ -321,7 +319,7 @@ def _ensure_system_prompt(messages: list[dict]) -> list[dict]:
 
 
 @app.post("/chat")
-@limiter.limit(f"{_chat_rate_limit}/minute" if _chat_rate_limit > 0 else None)
+@limiter.limit(f"{_chat_rate_limit}/minute" if _chat_rate_limit and _chat_rate_limit > 0 else "999999/minute")
 async def chat(request: Request, req: ChatRequest):
     """RAG-augmented chat proxy to Ollama.
 
@@ -362,16 +360,8 @@ async def chat(request: Request, req: ChatRequest):
         "stream": req.stream,
     }
 
-    # Build debug info for headers/response
-    debug_info = {
-        "rag_used": rag_used,
-        "sources_used": sources_used,
-        "route_mode": trace.route_mode,
-        "route_reason": trace.route_reason,
-        "route_method": trace.route_method,
-    }
-
     if not req.stream:
+        assert _http_pool is not None, "HTTP pool not initialized"
         resp = await _http_pool.post("/api/chat", json=ollama_payload)
         data = resp.json()
         data["rag_used"] = rag_used
@@ -382,6 +372,7 @@ async def chat(request: Request, req: ChatRequest):
 
     # Streaming proxy
     async def _stream_ollama():
+        assert _http_pool is not None, "HTTP pool not initialized"
         async with _http_pool.stream("POST", "/api/chat", json=ollama_payload) as resp:
             async for line in resp.aiter_lines():
                 if line:

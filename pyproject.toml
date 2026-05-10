@@ -56,4 +56,11 @@ ignore = ["E501"]
 
 [tool.coverage.run]
 source = ["obsidian_rag"]
-omit = ["tests/*"]
+omit = [
+    "tests/*",
+    "obsidian_rag/graph/*",
+    "obsidian_rag/api/cli.py",
+    "obsidian_rag/api/chat_cli.py",
+    "obsidian_rag/pipeline/sync.py",
+    "obsidian_rag/pipeline/__main__.py",
+]

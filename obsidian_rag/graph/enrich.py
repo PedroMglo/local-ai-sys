@@ -17,7 +17,6 @@ from typing import Any
 
 from obsidian_rag.config import settings
 
-
 # ---------------------------------------------------------------------------
 # 1. Community summaries via Ollama
 # ---------------------------------------------------------------------------
@@ -42,8 +41,8 @@ Responde APENAS com a descrição, sem título, sem bullet points, sem formataç
 
 def _call_ollama(prompt: str, model: str | None = None) -> str:
     """Chama Ollama local via API HTTP (sem dependência openai)."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     mdl = model or settings.graphify.model or "qwen3:8b"
     base = settings.ollama.base_url.rstrip("/")
@@ -71,11 +70,12 @@ def _call_ollama(prompt: str, model: str | None = None) -> str:
         return f"(sumário indisponível: {e})"
 
 
-def _load_cache(cache_path: Path) -> dict:
+def _load_cache(cache_path: Path) -> dict:  # type: ignore[type-arg]
     if cache_path.exists():
         try:
             with open(cache_path, encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                return dict(data) if isinstance(data, dict) else {}
         except (json.JSONDecodeError, OSError):
             pass
     return {}

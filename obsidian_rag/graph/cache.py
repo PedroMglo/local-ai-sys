@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -74,13 +73,14 @@ def _build_nodes_index(nodes: list[dict]) -> dict[tuple[str, str], dict]:
     return index
 
 
-def _safe_json_load(path: Path) -> dict | None:
+def _safe_json_load(path: Path) -> dict | None:  # type: ignore[type-arg]
     """Load JSON safely, returning None on any error."""
     if not path.exists():
         return None
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            return dict(data) if isinstance(data, dict) else None
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Failed to load %s: %s", path, e)
         return None
@@ -162,11 +162,13 @@ class GraphCache:
 
         # Analysis
         ap = self._analysis_path(repo_name)
-        analysis = _safe_json_load(ap) if ap else None
+        analysis = _safe_json_load(ap) if ap is not None else None
 
         # Community summaries
         sp = self._summaries_path(repo_name)
-        summaries = _safe_json_load(sp) or {}
+        summaries = _safe_json_load(sp) if sp is not None else None
+        if summaries is None:
+            summaries = {}
 
         nodes = graph_data.get("nodes", [])
         nodes_by_id = {n["id"]: n for n in nodes}
@@ -306,7 +308,7 @@ class GraphCache:
         analysis = self.get_analysis(repo_name)
         if analysis is None:
             return []
-        return analysis.get("gods", [])
+        return list(analysis.get("gods", []))
 
     def list_graph_repos(self) -> list[str]:
         """List repo names that have a graph.json."""

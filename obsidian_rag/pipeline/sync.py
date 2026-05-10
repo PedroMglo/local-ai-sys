@@ -14,15 +14,13 @@ CLI:
 from __future__ import annotations
 
 import argparse
-import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from obsidian_rag.config import settings
-from obsidian_rag.chunking.markdown import chunk_all_notes
 from obsidian_rag.chunking.code import chunk_repo
-from obsidian_rag.store.chroma import sync_to_chroma, sync_repo_to_chroma, get_client, get_collection
-
+from obsidian_rag.chunking.markdown import chunk_all_notes
+from obsidian_rag.config import settings
+from obsidian_rag.store.chroma import get_client, get_collection, sync_repo_to_chroma, sync_to_chroma
 
 # ---------------------------------------------------------------------------
 # Sync functions

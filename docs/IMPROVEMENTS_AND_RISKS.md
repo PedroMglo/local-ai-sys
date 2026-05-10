@@ -399,7 +399,7 @@ Os ficheiros `__init__.py` não definem `__all__`, tornando o API público de ca
 | **Complexidade**       | Média                                  |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`             |
 
-**Resolução (2026-05-10):** 91 unit tests implementados com pytest (83 iniciais + 8 para funcionalidades médias). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON e tokenizer regex. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos. Próximos passos: integration tests com TestClient + ChromaDB in-memory (ver Fase 2, item 6).
+**Resolução (2026-05-10):** 107 testes implementados com pytest (83 unit iniciais + 8 funcionalidades médias + 16 integration tests com ChromaDB in-memory). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex e integration tests com TestClient + ChromaDB in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
 
 ### 10.2 ~~Autenticação da API~~ ✅ RESOLVIDO
 
@@ -440,27 +440,27 @@ Os ficheiros `__init__.py` não definem `__all__`, tornando o API público de ca
 
 **Resolução (2026-05-10):** Adicionada classe `_JsonFormatter` em `observe.py` que emite JSON lines. File handler usa sempre JSON. Consola usa JSON quando `log_format = "json"` na secção `[debug]` de `rag.toml`. Novo campo `log_format` no dataclass `DebugConfig`.
 
-### 10.6 Rate limiting na API
+### 10.6 ~~Rate limiting na API~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                   |
 | ---------------------- | ----------------------------------------- |
-| **Prioridade**         | Média                                     |
+| **Prioridade**         | ~~Média~~ — Resolvido                     |
 | **Impacto**            | Médio — protege contra overload acidental |
 | **Complexidade**       | Baixa                                     |
 | **Ficheiros afetados** | `obsidian_rag/api/app.py`                 |
 
-Adicionar middleware de rate limiting (ex: `slowapi` ou simples in-memory counter). Protege o Ollama de sobrecarga.
+**Resolução (2026-05-10):** Implementado com `slowapi`. Limites configuráveis: `rate_limit=60/min` (global), `chat_rate_limit=20/min` (endpoint `/chat`). Ver §5.2.
 
-### 10.7 Validação de input nos endpoints
+### 10.7 ~~Validação de input nos endpoints~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                         |
 | ---------------------- | ------------------------------- |
-| **Prioridade**         | Média                           |
+| **Prioridade**         | ~~Média~~ — Resolvido           |
 | **Impacto**            | Médio — previne crashes e abuso |
 | **Complexidade**       | Baixa                           |
 | **Ficheiros afetados** | `obsidian_rag/api/schemas.py`   |
 
-Adicionar `max_length` e `min_length` nos campos `query` e `content` dos modelos Pydantic. Ex: `query: str = Field(max_length=10000)`.
+**Resolução (2026-05-10):** `max_length` e `min_length` adicionados a todos os campos string dos modelos Pydantic. Ver §5.3.
 
 ### 10.8 Chunking multi-linguagem
 
@@ -535,19 +535,19 @@ Adicionar verificação de conectividade ao Ollama durante o `lifespan` startup.
 
 ### Fase 2 — Robustez (Média prioridade)
 
-| #   | Tarefa                                                | Complexidade | Estado       |
-| --- | ----------------------------------------------------- | ------------ | ------------ |
-| 6   | Integration tests com TestClient + ChromaDB in-memory | Média        |              |
-| 7   | Configurar ruff/mypy no pyproject.toml                | Baixa        |              |
-| 8   | CI/CD básico (GitHub Actions: lint + test)            | Média        |              |
-| 9   | Rate limiting com slowapi                             | Baixa        |              |
-| 10  | ~~Tokenizer real para budget~~                        | Média        | ✅ Concluído |
-| C3  | ~~Sync paralelo de repos (ThreadPoolExecutor)~~       | Média        | ✅ Concluído |
-| D1  | ~~Logging estruturado JSON~~                          | Baixa        | ✅ Concluído |
-| D2  | ~~Backup ChromaDB com rotação~~                       | Baixa        | ✅ Concluído |
-| D3  | ~~Containerização Docker~~                            | Baixa        | ✅ Concluído |
+| #   | Tarefa                                                    | Complexidade | Estado       |
+| --- | --------------------------------------------------------- | ------------ | ------------ |
+| 6   | ~~Integration tests com TestClient + ChromaDB in-memory~~ | Média        | ✅ Concluído |
+| 7   | ~~Configurar ruff/mypy no pyproject.toml~~                | Baixa        | ✅ Concluído |
+| 8   | ~~CI/CD básico (GitHub Actions: lint + test)~~            | Média        | ✅ Concluído |
+| 9   | ~~Rate limiting com slowapi~~                             | Baixa        | ✅ Concluído |
+| 10  | ~~Tokenizer real para budget~~                            | Média        | ✅ Concluído |
+| C3  | ~~Sync paralelo de repos (ThreadPoolExecutor)~~           | Média        | ✅ Concluído |
+| D1  | ~~Logging estruturado JSON~~                              | Baixa        | ✅ Concluído |
+| D2  | ~~Backup ChromaDB com rotação~~                           | Baixa        | ✅ Concluído |
+| D3  | ~~Containerização Docker~~                                | Baixa        | ✅ Concluído |
 
-> **Items de média prioridade concluídos em 2026-05-10.** Restam: integration tests, linting/type checking, CI/CD e rate limiting.
+> **Fase 2 concluída em 2026-05-10.** Todas as tarefas de média prioridade foram implementadas. 107 testes (91 unit + 16 integration) passam em <1s.
 
 ### Fase 3 — Evolução (Baixa prioridade)
 

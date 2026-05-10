@@ -15,7 +15,8 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         timeout=120.0,
     )
     response.raise_for_status()
-    return response.json()["embeddings"]
+    result: list[list[float]] = response.json()["embeddings"]
+    return result
 
 
 # LRU cache for single-query embeddings (avoids repeated Ollama calls)

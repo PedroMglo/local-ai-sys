@@ -37,10 +37,10 @@ def _strip_frontmatter(text: str) -> str:
 
 def _is_navigation_content(text: str) -> bool:
     """True if chunk is mostly wikilinks/navigation (low value for RAG)."""
-    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
     if not lines:
         return True
-    link_lines = sum(1 for l in lines if LINK_ONLY_RE.match(l))
+    link_lines = sum(1 for ln in lines if LINK_ONLY_RE.match(ln))
     return link_lines / len(lines) > 0.7
 
 

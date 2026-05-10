@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from obsidian_rag.config import settings
-from obsidian_rag.graph.builder import get_graph_json_path, get_report_path, _graphify_output_dir
+from obsidian_rag.graph.builder import _graphify_output_dir, get_graph_json_path, get_report_path
 
 
 def _require_networkx():
@@ -154,7 +154,7 @@ def get_neighbors(repo_name: str, node_label: str, max_results: int = 10) -> lis
     Returns:
         Lista de dicts com {id, label, relation, confidence, source_file}
     """
-    nx = _require_networkx()
+    _require_networkx()
     G = load_graph(repo_name)
 
     # Encontrar nó por label (case-insensitive partial match)
@@ -228,7 +228,7 @@ def shortest_path(repo_name: str, source_label: str, target_label: str) -> list[
         for node, data in G.nodes(data=True):
             node_label = data.get("label", str(node))
             if label.lower() in node_label.lower():
-                return node
+                return str(node)
         return None
 
     source = find_node(source_label)
@@ -267,7 +267,7 @@ def list_repos() -> list[dict[str, Any]]:
 
         if graph_path is not None:
             try:
-                nx = _require_networkx()
+                _require_networkx()
                 G = load_graph(name)
                 entry["node_count"] = G.number_of_nodes()
                 entry["edge_count"] = G.number_of_edges()
