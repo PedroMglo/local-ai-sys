@@ -452,7 +452,7 @@ def run_init(args: Namespace) -> None:
         if _ask_yn("Expor API em 0.0.0.0 (acesso remoto)?", default=False):
             host = "0.0.0.0"
             api_key = secrets.token_urlsafe(32)
-            print(f"  ⚠ API key gerada: {api_key}")
+            print("  ✓ API key gerada.")
             print("  Guarda esta chave! Necessária para aceder à API.")
     print()
 
