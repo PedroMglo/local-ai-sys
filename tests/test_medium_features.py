@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from obsidian_rag.pipeline.backup import backup_chroma, MAX_BACKUPS
+from obsidian_rag.pipeline.backup import backup_store, MAX_BACKUPS
 from obsidian_rag.retrieval.observe import _JsonFormatter
 
 
@@ -23,7 +23,7 @@ class TestBackupChroma:
 
         with patch("obsidian_rag.pipeline.backup.settings") as mock_settings:
             mock_settings.paths.data_dir = chroma_dir
-            result = backup_chroma(dest)
+            result = backup_store(dest)
 
         assert result.exists()
         assert (result / "test.db").read_text() == "data"
@@ -37,20 +37,20 @@ class TestBackupChroma:
 
         # Create MAX_BACKUPS + 1 existing backups
         for i in range(MAX_BACKUPS + 1):
-            (dest / f"chroma_backup_2024010{i}_000000").mkdir()
+            (dest / f"store_backup_2024010{i}_000000").mkdir()
 
         with patch("obsidian_rag.pipeline.backup.settings") as mock_settings:
             mock_settings.paths.data_dir = chroma_dir
-            backup_chroma(dest)
+            backup_store(dest)
 
-        backups = list(dest.glob("chroma_backup_*"))
+        backups = list(dest.glob("store_backup_*"))
         assert len(backups) <= MAX_BACKUPS
 
     def test_raises_on_missing_dir(self, tmp_path: Path):
         with patch("obsidian_rag.pipeline.backup.settings") as mock_settings:
             mock_settings.paths.data_dir = tmp_path / "nonexistent"
             with pytest.raises(FileNotFoundError):
-                backup_chroma()
+                backup_store()
 
 
 class TestJsonFormatter:

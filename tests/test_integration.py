@@ -118,13 +118,17 @@ def code_collection(chroma_client):
 
 
 @pytest.fixture()
-def integration_client(notes_collection, code_collection):
-    """TestClient with ChromaDB in-memory collections injected."""
+def integration_client(chroma_client, notes_collection, code_collection):
+    """TestClient with ChromaDB in-memory collections injected via VectorStore."""
+    from obsidian_rag.store.chroma_store import ChromaVectorStore
+
     fake_query_embed = _fake_embedding(1)  # will match note-1 closely
 
+    # Build a ChromaVectorStore backed by the in-memory client
+    store = ChromaVectorStore(client=chroma_client)
+
     with (
-        patch("obsidian_rag.api.app._get_collection", return_value=notes_collection),
-        patch("obsidian_rag.api.app._get_code_collection", return_value=code_collection),
+        patch("obsidian_rag.api.app._get_store", return_value=store),
         patch("obsidian_rag.api.app.get_query_embedding", return_value=fake_query_embed),
         patch("obsidian_rag.api.app.settings") as mock_settings,
     ):
@@ -135,6 +139,7 @@ def integration_client(notes_collection, code_collection):
         mock_settings.repos.paths = ["/fake/repo"]
         mock_settings.repos.collection_name = "code_repos"
         mock_settings.paths.data_dir = "/tmp/test-chroma"
+        mock_settings.store.backend = "chroma"
 
         from obsidian_rag.api.app import app
         yield TestClient(app, raise_server_exceptions=False)

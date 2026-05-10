@@ -49,14 +49,27 @@ def fake_perf():
 
 
 @pytest.fixture
-def mock_collection():
-    """Mock ChromaDB collection."""
-    coll = MagicMock()
-    coll.add = MagicMock()
-    coll.delete = MagicMock()
-    coll.count = MagicMock(return_value=0)
-    coll.get = MagicMock(return_value={"ids": []})
-    return coll
+def mock_store():
+    """Mock VectorStore."""
+    store = MagicMock()
+    store.upsert_batch = MagicMock()
+    store.delete_ids = MagicMock(return_value=0)
+    store.count = MagicMock(return_value=0)
+    store.get_existing_ids = MagicMock(return_value=set())
+    return store
+
+
+@pytest.fixture
+def noop_governor():
+    """Governor that always returns CONTINUE — no resource checks."""
+    from obsidian_rag.pipeline.governor import GovernorAction
+    gov = MagicMock()
+    gov.check = MagicMock(return_value=GovernorAction.CONTINUE)
+    gov.wait_until_safe = MagicMock(return_value=GovernorAction.CONTINUE)
+    gov.start = MagicMock()
+    gov.stop = MagicMock()
+    gov.snapshot = MagicMock(return_value=None)
+    return gov
 
 
 def _make_chunks(n: int, prefix: str = "chunk") -> list[Chunk]:
@@ -79,7 +92,7 @@ class TestIngestPipelineEndToEnd:
     """End-to-end tests with mocked embed_texts and file parsing."""
 
     def test_pipeline_processes_files(
-        self, tmp_path: Path, manifest: IngestManifest, fake_perf, mock_collection
+        self, tmp_path: Path, manifest: IngestManifest, fake_perf, mock_store, noop_governor
     ) -> None:
         """Create real Python files, run pipeline, verify chunks are stored."""
         # Create a tiny repo with files large enough to produce chunks (min_chars=80)
@@ -109,7 +122,7 @@ class TestIngestPipelineEndToEnd:
 
         sources = [IngestSource(source_type="code", path=repo, name="test_repo")]
 
-        pipeline = IngestPipeline(manifest, fake_perf, mock_collection, embed_fn=_fake_embed)
+        pipeline = IngestPipeline(manifest, fake_perf, mock_store, embed_fn=_fake_embed, governor=noop_governor)
         result = pipeline.run(sources)
 
         assert result.files_scanned >= 2
@@ -117,10 +130,10 @@ class TestIngestPipelineEndToEnd:
         assert result.chunks_embedded >= 1
         assert result.chunks_stored >= 1
         assert result.elapsed_seconds > 0
-        assert mock_collection.add.called
+        assert mock_store.upsert_batch.called
 
     def test_pipeline_skips_unchanged_files(
-        self, tmp_path: Path, manifest: IngestManifest, fake_perf, mock_collection
+        self, tmp_path: Path, manifest: IngestManifest, fake_perf, mock_store, noop_governor
     ) -> None:
         """Files already in the manifest with same mtime/size/sha should be skipped."""
         repo = tmp_path / "test_repo"
@@ -136,14 +149,14 @@ class TestIngestPipelineEndToEnd:
 
         sources = [IngestSource(source_type="code", path=repo, name="test_repo")]
 
-        pipeline = IngestPipeline(manifest, fake_perf, mock_collection, embed_fn=_fake_embed)
+        pipeline = IngestPipeline(manifest, fake_perf, mock_store, embed_fn=_fake_embed, governor=noop_governor)
         result = pipeline.run(sources)
 
         assert result.files_skipped >= 1
         assert result.files_parsed == 0  # nothing to parse
 
     def test_empty_repo(
-        self, tmp_path: Path, manifest: IngestManifest, fake_perf, mock_collection
+        self, tmp_path: Path, manifest: IngestManifest, fake_perf, mock_store, noop_governor
     ) -> None:
         """Empty repo should produce zero results without errors."""
         repo = tmp_path / "empty_repo"
@@ -151,7 +164,7 @@ class TestIngestPipelineEndToEnd:
 
         sources = [IngestSource(source_type="code", path=repo, name="empty_repo")]
 
-        pipeline = IngestPipeline(manifest, fake_perf, mock_collection, embed_fn=_fake_embed)
+        pipeline = IngestPipeline(manifest, fake_perf, mock_store, embed_fn=_fake_embed, governor=noop_governor)
         result = pipeline.run(sources)
 
         assert result.files_scanned == 0
@@ -196,8 +209,8 @@ class TestFileJob:
             repo_dir="/tmp",
             source_type="code",
         )
-        pickled = pickle.dumps(job)
-        restored = pickle.loads(pickled)
+        pickled = pickle.dumps(job)  # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
+        restored = pickle.loads(pickled)  # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
         assert restored == job
 
     def test_embedded_batch_structure(self) -> None:
@@ -210,7 +223,7 @@ class TestFileJob:
 
 class TestMultipleRepos:
     def test_pipeline_handles_multiple_sources(
-        self, tmp_path: Path, manifest: IngestManifest, fake_perf, mock_collection
+        self, tmp_path: Path, manifest: IngestManifest, fake_perf, mock_store, noop_governor
     ) -> None:
         """Pipeline should process multiple repos in a single run."""
         repo1 = tmp_path / "repo1"
@@ -235,7 +248,7 @@ class TestMultipleRepos:
             IngestSource(source_type="code", path=repo2, name="repo2"),
         ]
 
-        pipeline = IngestPipeline(manifest, fake_perf, mock_collection, embed_fn=_fake_embed)
+        pipeline = IngestPipeline(manifest, fake_perf, mock_store, embed_fn=_fake_embed, governor=noop_governor)
         result = pipeline.run(sources)
 
         assert result.files_scanned >= 2

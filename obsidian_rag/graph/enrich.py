@@ -60,7 +60,7 @@ def _call_ollama(prompt: str, model: str | None = None) -> str:
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:  # nosec B310  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             data = json.loads(resp.read())
             raw = data.get("response", "").strip()
             # deepseek-r1 wraps in <think>...</think> — strip it

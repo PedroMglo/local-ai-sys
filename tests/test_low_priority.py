@@ -166,19 +166,15 @@ class TestThreadSafeSingletons:
     def test_reset_collections_clears_all(self):
         from obsidian_rag.retrieval.rag import _reset_collections
         import obsidian_rag.retrieval.rag as rag_mod
-        # Set dummy values
-        rag_mod._chroma_client = "dummy_client"
-        rag_mod._chroma_collection = "dummy_col"
-        rag_mod._code_collection = "dummy_code"
+        # Set dummy value
+        rag_mod._store = "dummy_store"
         _reset_collections()
-        assert rag_mod._chroma_client is None
-        assert rag_mod._chroma_collection is None
-        assert rag_mod._code_collection is None
+        assert rag_mod._store is None
 
     def test_override_bypasses_singleton(self):
-        from obsidian_rag.retrieval.rag import _get_collection
+        from obsidian_rag.retrieval.rag import _get_store
         fake = MagicMock()
-        result = _get_collection(_override=fake)
+        result = _get_store(_override=fake)
         assert result is fake
 
 
