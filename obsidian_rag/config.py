@@ -306,5 +306,33 @@ def load_settings() -> Settings:
     )
 
 
-# Module-level singleton (loaded once on import)
-settings = load_settings()
+def config_exists() -> bool:
+    """Check if rag.toml exists without loading it."""
+    return (PROJECT_ROOT / "rag.toml").exists()
+
+
+class _LazySettings:
+    """Proxy that defers load_settings() until first attribute access.
+
+    Allows ``from obsidian_rag.config import settings`` without crashing
+    when rag.toml does not exist yet (e.g. before ``rag init``).
+    """
+
+    _instance: Settings | None = None
+
+    def _load(self) -> Settings:
+        if self._instance is None:
+            self._instance = load_settings()
+        return self._instance
+
+    def __getattr__(self, name: str):
+        return getattr(self._load(), name)
+
+    def __repr__(self) -> str:
+        if self._instance is None:
+            return "<LazySettings: not loaded>"
+        return repr(self._instance)
+
+
+# Module-level singleton — lazy-loaded on first attribute access
+settings = _LazySettings()

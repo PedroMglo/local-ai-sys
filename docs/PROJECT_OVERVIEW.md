@@ -1,6 +1,6 @@
 # PROJECT OVERVIEW — obsidian-rag
 
-> **Versão:** 0.3.1  
+> **Versão:** 0.4.0  
 > **Última atualização:** 2026-05-10  
 > **Linguagem:** Python ≥ 3.11  
 > **Licença:** A confirmar
@@ -103,23 +103,28 @@ O **obsidian-rag** é um pipeline de RAG (Retrieval-Augmented Generation) 100% l
 
 ```
 obsidian-rag/
-├── pyproject.toml              # Package config, dependências, entry points
+├── pyproject.toml              # Package config, dependências, entry point único `rag`
 ├── rag.toml                    # Configuração central (todas as opções)
 ├── requirements.txt            # Dependências mínimas
-├── README.md                   # Documentação básica
-├── Dockerfile                  # Multi-stage build (python:3.11-slim)
+├── README.md                   # Documentação (reescrito em v0.4.0)
+├── Makefile                    # Atalhos: make install, init, up, serve, sync, test, etc.
+├── install.sh                  # Instalador: cria venv, instala deps, valida comandos
+├── Dockerfile                  # Multi-stage build (python:3.11-slim), CMD ["rag", "serve"]
 ├── docker-compose.yml          # Serviço obsidian-rag + rede Ollama
 ├── docs/                       # Documentação técnica detalhada
 │   ├── PROJECT_OVERVIEW.md     # Este ficheiro
 │   └── IMPROVEMENTS_AND_RISKS.md
-├── tests/                      # Testes automatizados (pytest)
+├── tests/                      # Testes automatizados (pytest) — 131 testes
 │   ├── __init__.py
 │   ├── conftest.py             # Fixtures partilhadas
 │   ├── test_api.py             # Testes de auth middleware e /health
 │   ├── test_budget.py          # Testes de alocação de token budget
 │   ├── test_chunking_code.py   # Testes de chunking Python (AST)
 │   ├── test_chunking_markdown.py # Testes de chunking Markdown
+│   ├── test_cli_dispatch.py    # Testes do CLI dispatcher (rag <subcommand>)
+│   ├── test_init.py            # Testes do wizard rag init (path validation, etc.)
 │   ├── test_router.py          # Testes de heurística do router
+│   ├── test_security.py        # Testes de segurança (bind validation, _EXCLUDED_DIRS, etc.)
 │   ├── test_medium_features.py # Backup, logging JSON, config, tokenizer
 │   └── test_integration.py     # Integration tests: endpoints + ChromaDB in-memory
 ├── .github/
@@ -136,14 +141,24 @@ obsidian-rag/
 │       └── SPEECH-LAB/graphify-out/
 ├── obsidian_rag/               # Código principal
 │   ├── __init__.py
-│   ├── config.py               # Carregamento de rag.toml + env overrides + PipelineConfig + DebugConfig
-│   ├── api/                    # FastAPI endpoints + CLIs
-│   │   ├── app.py              # Aplicação FastAPI + lifespan
+│   ├── config.py               # _LazySettings proxy, config_exists(), env overrides, dataclasses
+│   ├── cli/                    # CLI unificado (v0.4.0)
+│   │   ├── __init__.py
+│   │   ├── main.py             # Dispatcher `rag` — argparse com subcommands
+│   │   ├── init_cmd.py         # `rag init` — wizard interactivo, gera rag.toml
+│   │   ├── up_cmd.py           # `rag up` — pre-flight checks + start API
+│   │   ├── doctor_cmd.py       # `rag doctor` — diagnóstico ✓/✗ do sistema
+│   │   ├── graph_cmd.py        # `rag graph build|status`
+│   │   ├── _query.py           # `rag query` — wrapper do cli.py original
+│   │   ├── _chat.py            # `rag chat` — wrapper do chat_cli.py original
+│   │   └── _backup.py          # `rag backup` — wrapper do backup.py original
+│   ├── api/                    # FastAPI endpoints
+│   │   ├── app.py              # Aplicação FastAPI + lifespan + serve() com bind validation
 │   │   ├── schemas.py          # Modelos Pydantic (request/response)
-│   │   ├── cli.py              # rag-query CLI
-│   │   └── chat_cli.py         # rag-chat CLI (REPL interativo)
+│   │   ├── cli.py              # Lógica de query one-shot (usada por `rag query`)
+│   │   └── chat_cli.py         # REPL interativo (usado por `rag chat`)
 │   ├── chunking/               # Divisão de texto em chunks
-│   │   ├── markdown.py         # Chunking por headers H1/H2/H3
+│   │   ├── markdown.py         # Chunking por headers H1/H2/H3 + _EXCLUDED_DIRS
 │   │   └── code.py             # Chunking via ast.parse() (Python)
 │   ├── embeddings/
 │   │   └── ollama.py           # Embeddings via Ollama bge-m3
@@ -154,8 +169,8 @@ obsidian-rag/
 │   │   ├── enrich.py           # Community summaries, Mermaid, tags
 │   │   └── obsidian_export.py  # Export para vault Obsidian
 │   ├── pipeline/
-│   │   ├── sync.py             # Pipeline de sincronização (rag-sync) — sync paralelo
-│   │   ├── backup.py           # Backup ChromaDB com rotação (rag-backup)
+│   │   ├── sync.py             # Pipeline de sincronização — sync paralelo
+│   │   ├── backup.py           # Backup ChromaDB com rotação
 │   │   └── __main__.py
 │   ├── prompts/
 │   │   └── templates.py        # Templates de prompts (PT-PT)
@@ -179,12 +194,13 @@ obsidian-rag/
 
 ## Fluxo de funcionamento
 
-### 1. Sincronização (`rag-sync`)
+### 1. Sincronização (`rag sync`)
 
 ```
-rag-sync -l:
+rag sync -l:
   1. Copia notas do vault Obsidian → source/
   2. chunk_all_notes() — divide por headers H1/H2/H3, aplica overlap
+     (exclui .git, .venv, node_modules, __pycache__, .cache, dist, build, .obsidian)
   3. Gera SHA256 IDs para sync incremental (só chunks novos/alterados)
   4. embed_texts() — gera embeddings via Ollama bge-m3 (batches de 50)
   5. sync_to_chroma() — upsert na coleção "obsidian_vault"
@@ -192,17 +208,17 @@ rag-sync -l:
      a. chunk_repo() — AST parse (Python) + markdown fallback
      b. sync_repo_to_chroma() — upsert na coleção "code_repos"
 
-rag-sync -g:
+rag sync -g:
   1. graphify extract — extrai grafo estrutural de cada repo
   2. Gera graph.json (node-link), GRAPH_REPORT.md, community_summaries.json
   3. export_all() — exporta grafos como notas Markdown para ~/Obsidian/knowledge-graphs/
   4. Invalida cache do grafo em memória
 
-rag-sync --all:
+rag sync --all:
   Executa -l seguido de -g
 ```
 
-### 2. Query (`rag-query`, `/query`, `/query/code`)
+### 2. Query (`rag query`, `/query`, `/query/code`)
 
 ```
 1. Recebe query textual
@@ -212,7 +228,7 @@ rag-sync --all:
 5. Devolve ChunkResults ordenados por relevância
 ```
 
-### 3. Chat RAG-augmented (`rag-chat`, `/chat`)
+### 3. Chat RAG-augmented (`rag chat`, `/chat`)
 
 ```
 1. Recebe mensagem + histórico de conversa
@@ -240,10 +256,10 @@ rag-sync --all:
 
 ### Chunking (`obsidian_rag/chunking/`)
 
-| Módulo        | Função                                                                                                                                                                                                                                                            |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `markdown.py` | Divide `.md` por headers H1/H2/H3. Sliding-window fallback com overlap. Strips YAML frontmatter. Filtra chunks de navegação (>60-70% wikilinks). Adiciona contextual prefix (`Note: {título} \| Section: {header}`)                                               |
-| `code.py`     | Chunks Python via `ast.parse()` (zero deps externas). Um chunk por função/método, um por classe (signature summary), um por módulo (imports + constants). Ficheiros `.md/.yaml/.toml/.sh` em repos são delegados ao markdown chunker com `source_type="repo_doc"` |
+| Módulo        | Função                                                                                                                                                                                                                                                                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `markdown.py` | Divide `.md` por headers H1/H2/H3. Sliding-window fallback com overlap. Strips YAML frontmatter. Filtra chunks de navegação (>60-70% wikilinks). Adiciona contextual prefix (`Note: {título} \| Section: {header}`). Exclui dirs: `.git`, `.venv`, `node_modules`, `__pycache__`, `.cache`, `dist`, `build`, `.obsidian` |
+| `code.py`     | Chunks Python via `ast.parse()` (zero deps externas). Um chunk por função/método, um por classe (signature summary), um por módulo (imports + constants). Ficheiros `.md/.yaml/.toml/.sh` em repos são delegados ao markdown chunker com `source_type="repo_doc"`                                                        |
 
 ### Embeddings (`obsidian_rag/embeddings/`)
 
@@ -281,17 +297,32 @@ rag-sync --all:
 
 ### API (`obsidian_rag/api/`)
 
-| Módulo        | Função                                                                                                                                                |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app.py`      | FastAPI com `lifespan` (preload ChromaDB, httpx pool). Middleware de autenticação via API key (`Bearer`). Todos os endpoints REST + streaming `/chat` |
-| `schemas.py`  | Modelos Pydantic: QueryRequest, ChatRequest, ChunkResult, RepoInfo, etc.                                                                              |
-| `cli.py`      | `rag-query` — one-shot semantic query, output stdout                                                                                                  |
-| `chat_cli.py` | `rag-chat` — REPL interativo com history, `--debug`, `--no-rag`, `--mode`                                                                             |
+| Módulo        | Função                                                                                                                                                                       |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.py`      | FastAPI com `lifespan` (preload ChromaDB, httpx pool). Middleware de autenticação via API key (`Bearer`). `serve()` recusa `0.0.0.0` sem `api_key`. Endpoints REST + `/chat` |
+| `schemas.py`  | Modelos Pydantic: QueryRequest, ChatRequest, ChunkResult, RepoInfo, etc.                                                                                                     |
+| `cli.py`      | Lógica de query one-shot (usado internamente por `rag query`)                                                                                                                |
+| `chat_cli.py` | REPL interativo com history, `--debug`, `--no-rag`, `--mode` (usado por `rag chat`)                                                                                          |
 
-| Módulo      | Função                                                                                                                                      |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sync.py`   | CLI `rag-sync`. Três modos: `-l` (notas + repos), `-g` (graphify), `--all`. Sync paralelo de repos com `ThreadPoolExecutor` (max_workers=4) |
-| `backup.py` | CLI `rag-backup`. Backup timestamped do ChromaDB (`shutil.copytree`) com rotação (mantém últimas 3 cópias)                                  |
+### CLI unificado (`obsidian_rag/cli/`) — v0.4.0
+
+| Módulo          | Função                                                                                                            |
+| --------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `main.py`       | Dispatcher `rag` — argparse com subcommands. Imports lazy para não carregar `settings` desnecessariamente         |
+| `init_cmd.py`   | `rag init` — wizard interactivo: gera `rag.toml`, detecta vault/Git, lista modelos Ollama, valida paths perigosos |
+| `up_cmd.py`     | `rag up` — pre-flight checks (Ollama, modelos, ChromaDB) + `serve()`                                              |
+| `doctor_cmd.py` | `rag doctor` — diagnóstico ✓/✗ (Python, deps, config, paths, Ollama, ChromaDB, Graphify)                          |
+| `graph_cmd.py`  | `rag graph build [--force] [--repo]` + `rag graph status`                                                         |
+| `_query.py`     | `rag query` — wrapper delegando a `api.cli`                                                                       |
+| `_chat.py`      | `rag chat` — wrapper delegando a `api.chat_cli`                                                                   |
+| `_backup.py`    | `rag backup` — wrapper delegando a `pipeline.backup`                                                              |
+
+### Pipeline (`obsidian_rag/pipeline/`)
+
+| Módulo      | Função                                                                                                                      |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `sync.py`   | Três modos: `-l` (notas + repos), `-g` (graphify), `--all`. Sync paralelo de repos com `ThreadPoolExecutor` (max_workers=4) |
+| `backup.py` | Backup timestamped do ChromaDB (`shutil.copytree`) com rotação (mantém últimas 3 cópias)                                    |
 
 ### Prompts (`obsidian_rag/prompts/`)
 
@@ -345,15 +376,24 @@ Não há dependência de APIs externas. Todo o processamento é local.
 
 _\*Apenas quando `api_key` está definido em `rag.toml` ou via `RAG_API_API_KEY`._
 
-## CLI — Entry Points
+## CLI — Comando unificado `rag`
 
-| Comando      | Módulo                 | Descrição                                                                                |
-| ------------ | ---------------------- | ---------------------------------------------------------------------------------------- |
-| `rag-sync`   | `pipeline.sync:main`   | Sincronização: `-l` (embeddings, paralelo), `-g` (grafos), `--all`, `--force`            |
-| `rag-serve`  | `api.app:serve`        | Inicia FastAPI em `127.0.0.1:8484` (configurável via `rag.toml`)                         |
-| `rag-query`  | `api.cli:main`         | Query one-shot ao ChromaDB (stdout)                                                      |
-| `rag-chat`   | `api.chat_cli:main`    | REPL interativo com debug, `--no-rag`, `--mode {auto\|rag_only\|graph_only\|both\|none}` |
-| `rag-backup` | `pipeline.backup:main` | Backup timestamped do ChromaDB com rotação automática (mantém últimas 3 cópias)          |
+Desde a v0.4.0, todos os 5 entry points antigos (`rag-sync`, `rag-serve`, `rag-query`, `rag-chat`, `rag-backup`) foram substituídos por um único comando `rag` com subcomandos. Entry point definido em `pyproject.toml`: `rag = "obsidian_rag.cli.main:main"`.
+
+| Comando                                                  | Descrição                                                                                                                                                |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rag init`                                               | Wizard interactivo: gera `rag.toml`, detecta vault Obsidian e repos Git, lista modelos Ollama, valida paths perigosos, força `api_key` se bind `0.0.0.0` |
+| `rag up`                                                 | Pre-flight checks (Ollama online, modelos disponíveis, ChromaDB acessível) → inicia API                                                                  |
+| `rag doctor`                                             | Diagnóstico do sistema com output ✓/✗ (Python, deps, config, paths, Ollama, ChromaDB, Graphify)                                                          |
+| `rag sync -l`                                            | Sincroniza embeddings de notas + repos (incremental, paralelo)                                                                                           |
+| `rag sync -g [--force]`                                  | Constrói knowledge graphs via Graphify                                                                                                                   |
+| `rag sync --all`                                         | Executa `-l` seguido de `-g`                                                                                                                             |
+| `rag serve`                                              | Inicia FastAPI em `127.0.0.1:8484` (recusa `0.0.0.0` sem `api_key`)                                                                                      |
+| `rag query "texto" [-n N]`                               | Pesquisa semântica one-shot (stdout ou `--json`)                                                                                                         |
+| `rag chat [-m modelo] [--debug] [--no-rag] [--mode ...]` | Chat interactivo com RAG                                                                                                                                 |
+| `rag backup [destino]`                                   | Backup timestamped do ChromaDB com rotação automática (mantém últimas 3 cópias)                                                                          |
+| `rag graph build [--force] [--repo NOME]`                | Construir knowledge graphs (um repo ou todos)                                                                                                            |
+| `rag graph status`                                       | Mostrar estado dos grafos por repositório                                                                                                                |
 
 ### Shell helpers (zsh)
 
@@ -370,13 +410,17 @@ _\*Apenas quando `api_key` está definido em `rag.toml` ou via `RAG_API_API_KEY`
 
 ### Obrigatórias
 
-| Pacote              | Versão  | Função                                            |
-| ------------------- | ------- | ------------------------------------------------- |
-| `chromadb`          | ≥ 0.5   | Base de dados vetorial persistente (HNSW, cosine) |
-| `fastapi`           | ≥ 0.110 | Framework REST API                                |
-| `uvicorn[standard]` | ≥ 0.29  | Servidor ASGI                                     |
-| `httpx`             | ≥ 0.27  | Cliente HTTP assíncrono (Ollama)                  |
-| `networkx`          | ≥ 3.0   | Leitura e query de grafos (graph.json)            |
+| Pacote              | Versão  | Função                                                                                                         |
+| ------------------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `chromadb`          | ≥ 0.5   | Base de dados vetorial persistente (HNSW, cosine)                                                              |
+| `fastapi`           | ≥ 0.110 | Framework REST API                                                                                             |
+| `uvicorn[standard]` | ≥ 0.29  | Servidor ASGI                                                                                                  |
+| `httpx`             | ≥ 0.27  | Cliente HTTP assíncrono (Ollama)                                                                               |
+| `networkx`          | ≥ 3.0   | Leitura e query de grafos (graph.json)                                                                         |
+| `slowapi`           | ≥ 0.1.9 | Rate limiting na API                                                                                           |
+| `graphifyy`         | —       | Knowledge graphs (AST + LLM). Pure Python (`py3-none-any`). Opt-in na execução (`enabled = false` por defeito) |
+
+> **Nota (v0.4.0):** `graphifyy` foi promovido de dependência opcional a obrigatória. É um pacote pure Python leve, instalado sempre, mas a execução de grafos continua opt-in via `[graphify] enabled` em `rag.toml`.
 
 ### Desenvolvimento
 
@@ -385,12 +429,8 @@ _\*Apenas quando `api_key` está definido em `rag.toml` ou via `RAG_API_API_KEY`
 | `pytest`         | ≥ 8.0  | Framework de testes              |
 | `pytest-asyncio` | ≥ 0.23 | Suporte async para testes pytest |
 | `coverage`       | ≥ 7.0  | Cobertura de código              |
-
-### Opcionais
-
-| Pacote      | Função                                                              |
-| ----------- | ------------------------------------------------------------------- |
-| `graphifyy` | CLI `graphify extract` — construção de knowledge graphs (AST + LLM) |
+| `mypy`           | ≥ 1.10 | Type checking                    |
+| `ruff`           | ≥ 0.4  | Linter e formatter               |
 
 ### Stdlib utilizada
 
@@ -431,43 +471,75 @@ _\*Apenas quando `api_key` está definido em `rag.toml` ou via `RAG_API_API_KEY`
 ### Instalação
 
 ```bash
-# Instalar o package
-pip install -e .
+# Instalador automatizado (cria venv, instala deps, valida)
+./install.sh
 
-# Opcional: suporte a knowledge graphs
-pip install graphifyy
-# ou
-pip install -e ".[graphify]"
+# Ou manualmente:
+pip install -e .
+```
+
+### Configuração inicial
+
+```bash
+# Wizard interactivo — gera rag.toml
+rag init
+
+# Diagnóstico do sistema
+rag doctor
 ```
 
 ### Uso
 
 ```bash
 # Sincronizar notas + repos (embeddings incrementais, sync paralelo)
-rag-sync -l
+rag sync -l
 
-# Construir knowledge graphs (requer graphifyy)
-rag-sync -g
-rag-sync -g --force   # rebuild completo
+# Construir knowledge graphs
+rag sync -g
+rag sync -g --force   # rebuild completo
 
 # Sincronizar tudo
-rag-sync --all
+rag sync --all
 
 # Backup ChromaDB (com rotação automática, mantém últimas 3 cópias)
-rag-backup
+rag backup
 
-# Iniciar API
-rag-serve              # FastAPI em 127.0.0.1:8484
+# Iniciar API (com pre-flight checks)
+rag up
+
+# Ou directamente:
+rag serve              # FastAPI em 127.0.0.1:8484
 
 # Query one-shot
-rag-query "como funciona o chunking?"
-rag-query -n 10 "configurar aliases zsh"
+rag query "como funciona o chunking?"
+rag query -n 10 "configurar aliases zsh"
+rag query --json "configurar aliases zsh"
 
 # Chat interativo
-rag-chat
-rag-chat -m deepseek-r1-pt --debug
-rag-chat --no-rag
-rag-chat --mode graph_only
+rag chat
+rag chat -m deepseek-r1-pt --debug
+rag chat --no-rag
+rag chat --mode graph_only
+
+# Knowledge graphs
+rag graph build
+rag graph build --force --repo SPEECH-LAB
+rag graph status
+```
+
+### Makefile (atalhos)
+
+```bash
+make install    # ./install.sh
+make init       # rag init
+make up         # rag up
+make serve      # rag serve
+make sync       # rag sync --all
+make graph      # rag graph build
+make doctor     # rag doctor
+make test       # pytest
+make backup     # rag backup
+make clean      # limpar __pycache__, .pytest_cache, .egg-info
 ```
 
 ### Environment overrides
@@ -475,10 +547,10 @@ rag-chat --mode graph_only
 Qualquer opção de `rag.toml` pode ser sobreposta via variável de ambiente `RAG_{SECÇÃO}_{CHAVE}`:
 
 ```bash
-RAG_RETRIEVAL_TOP_K=15 rag-serve
-RAG_GRAPHIFY_AUTO_UPDATE=true rag-sync -g
-RAG_DEBUG_ENABLED=true rag-serve
-RAG_API_PORT=9000 rag-serve
+RAG_RETRIEVAL_TOP_K=15 rag serve
+RAG_GRAPHIFY_AUTO_UPDATE=true rag sync -g
+RAG_DEBUG_ENABLED=true rag serve
+RAG_API_PORT=9000 rag serve
 ```
 
 ### Execução com Docker
@@ -497,7 +569,7 @@ docker compose logs -f obsidian-rag
 docker compose down
 ```
 
-O `docker-compose.yml` monta `./data` como volume e configura `extra_hosts: host.docker.internal:host-gateway` para aceder ao Ollama do host. A imagem usa multi-stage build com `python:3.11-slim` para manter o tamanho reduzido.
+O `docker-compose.yml` monta `./data` como volume e configura `extra_hosts: host.docker.internal:host-gateway` para aceder ao Ollama do host. A imagem usa multi-stage build com `python:3.11-slim`. O `CMD` é `["rag", "serve"]`.
 
 ## Como configurar o ambiente
 
@@ -528,6 +600,9 @@ O sync é agendado como timer systemd do utilizador, executando diariamente às 
 ### Testes manuais
 
 ```bash
+# Diagnóstico completo do sistema
+rag doctor
+
 # Verificar que o Ollama está acessível
 curl http://localhost:11434/api/tags
 
@@ -545,7 +620,7 @@ curl -X POST http://localhost:8484/chat \
   -d '{"model": "qwen3-pt", "messages": [{"role": "user", "content": "Olá"}]}'
 
 # Testar via CLI com debug
-rag-chat --debug -m qwen3-pt
+rag chat --debug -m qwen3-pt
 ```
 
 ### Testes automatizados
@@ -562,7 +637,7 @@ pytest tests/test_chunking_markdown.py
 pytest tests/test_api.py -v
 ```
 
-**107 testes** em 7 ficheiros, sem dependências externas (Ollama, ChromaDB):
+**131 testes** em 10 ficheiros, sem dependências externas (Ollama, ChromaDB):
 
 | Ficheiro                    | Testes | Cobertura                                                                                          |
 | --------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
@@ -571,6 +646,9 @@ pytest tests/test_api.py -v
 | `test_router.py`            | 13     | `_heuristic_route` com queries PT/EN, sinais de grafo/locais, edge cases                           |
 | `test_budget.py`            | 16     | `estimate_tokens`, `allocate_budget`, `truncate_chunks`, `truncate_text`                           |
 | `test_api.py`               | 7      | `/health`, middleware de auth (401 missing/wrong key, pass com key correcta)                       |
+| `test_cli_dispatch.py`      | —      | Dispatcher `rag`, subcommands, argparse                                                            |
+| `test_init.py`              | —      | `rag init`: validação de paths perigosos, geração de rag.toml                                      |
+| `test_security.py`          | —      | Bind validation (`0.0.0.0` sem key), `_EXCLUDED_DIRS`, sanitização de paths                        |
 | `test_medium_features.py`   | 25     | Backup, sync paralelo, logging JSON, tokenizer regex, configurações pipeline/debug                 |
 | `test_integration.py`       | 16     | `/query`, `/query/code`, `/stats` com ChromaDB in-memory, validação Pydantic (422)                 |
 
@@ -578,33 +656,36 @@ Fixtures partilhadas em `conftest.py`: `tmp_source_dir`, `sample_markdown_note`,
 
 ## Limitações conhecidas
 
-| Limitação                         | Descrição                                                                                                                                  |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Cobertura de testes parcial**   | 107 testes (unit + integration) cobrindo chunking, router, budget, API auth, endpoints com ChromaDB in-memory. Faltam e2e tests com Ollama |
-| **Chunking AST só para Python**   | Repositórios com outras linguagens usam fallback textual (menos preciso)                                                                   |
-| **Reranker disabled por defeito** | Adicionaria latência mas melhoraria precisão. Desativado por performance                                                                   |
-| **Auth opcional na API**          | API key auth disponível (`Bearer`) mas desativada por defeito (campo `api_key` vazio)                                                      |
-| **Graphify depende de LLM**       | A extração semântica de grafos requer chamadas ao Ollama, que pode ser lento                                                               |
-| **Single-user**                   | A arquitetura não suporta múltiplos utilizadores concorrentes de forma otimizada                                                           |
-| **Stop words apenas em PT**       | A lista de stop words para keyword search é apenas em português                                                                            |
+| Limitação                         | Descrição                                                                                                                           |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **Cobertura de testes parcial**   | 131 testes (unit + integration) cobrindo chunking, router, budget, API auth, CLI, segurança, endpoints. Faltam e2e tests com Ollama |
+| **Chunking AST só para Python**   | Repositórios com outras linguagens usam fallback textual (menos preciso)                                                            |
+| **Reranker disabled por defeito** | Adicionaria latência mas melhoraria precisão. Desativado por performance                                                            |
+| **Auth opcional na API**          | API key auth disponível (`Bearer`) mas desativada por defeito (campo `api_key` vazio)                                               |
+| **Graphify depende de LLM**       | A extração semântica de grafos requer chamadas ao Ollama, que pode ser lento                                                        |
+| **Single-user**                   | A arquitetura não suporta múltiplos utilizadores concorrentes de forma otimizada                                                    |
+| **Stop words apenas em PT**       | A lista de stop words para keyword search é apenas em português                                                                     |
 
 ## Estado atual do projeto
 
-| Aspeto               | Estado                                                                                                         |
-| -------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **Versão**           | 0.3.1                                                                                                          |
-| **Maturidade**       | Funcional para uso pessoal. Containerizado com Docker. Não é production-ready para deployment multi-utilizador |
-| **Pipeline RAG**     | Completo e funcional: chunking → embeddings → ChromaDB → retrieval multi-estratégia. Sync paralelo de repos    |
-| **Knowledge graphs** | Funcional com Graphify. Enrichment com community summaries, Mermaid e export Obsidian                          |
-| **API**              | 9 endpoints REST funcionais + streaming chat                                                                   |
-| **CLI**              | 5 entry points (sync, serve, query, chat, backup) + helpers zsh                                                |
-| **Router**           | LLM (gemma3:4b) + keyword heuristic fallback — funcional                                                       |
-| **Reranker**         | Implementado mas desativado por defeito                                                                        |
-| **Observabilidade**  | `QueryTrace` com decisões completas. Logging JSON estruturado (ficheiro/consola). Debug mode via `--debug`     |
-| **Backup**           | `rag-backup` — backup timestamped do ChromaDB com rotação automática (3 cópias)                                |
-| **Docker**           | `Dockerfile` multi-stage + `docker-compose.yml`. Porta 8000, volume `data/`, rede host Ollama                  |
-| **Documentação**     | Este ficheiro + `IMPROVEMENTS_AND_RISKS.md`                                                                    |
-| **Testes**           | 107 testes (91 unit + 16 integration) com pytest. Todos passam em <1s sem deps externas                        |
+| Aspeto               | Estado                                                                                                                            |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Versão**           | 0.4.0                                                                                                                             |
+| **Maturidade**       | Funcional para uso pessoal. Containerizado com Docker. Não é production-ready para deployment multi-utilizador                    |
+| **Pipeline RAG**     | Completo e funcional: chunking → embeddings → ChromaDB → retrieval multi-estratégia. Sync paralelo de repos                       |
+| **Knowledge graphs** | Funcional com Graphify (agora dep obrigatória, opt-in na execução). Enrichment + Mermaid + export Obsidian                        |
+| **API**              | 9 endpoints REST funcionais + streaming chat. Bind validation de segurança em `serve()`                                           |
+| **CLI**              | Comando unificado `rag` com 11 subcomandos (init, up, doctor, sync, serve, query, chat, backup, graph build/status) + helpers zsh |
+| **DX**               | `install.sh` + `Makefile` + `rag init` wizard + `rag doctor` diagnóstico + `rag up` pre-flight                                    |
+| **Config**           | `_LazySettings` proxy — config só carrega no primeiro acesso. `rag init` e `rag doctor` funcionam sem `rag.toml`                  |
+| **Router**           | LLM (gemma3:4b) + keyword heuristic fallback — funcional                                                                          |
+| **Reranker**         | Implementado mas desativado por defeito                                                                                           |
+| **Observabilidade**  | `QueryTrace` com decisões completas. Logging JSON estruturado (ficheiro/consola). Debug mode via `--debug`                        |
+| **Backup**           | `rag backup` — backup timestamped do ChromaDB com rotação automática (3 cópias)                                                   |
+| **Docker**           | `Dockerfile` multi-stage + `docker-compose.yml`. `CMD ["rag", "serve"]`. Porta 8000, volume `data/`                               |
+| **Segurança**        | Bind validation, path validation (paths perigosos), `_EXCLUDED_DIRS`, API key + rate limiting                                     |
+| **Documentação**     | Este ficheiro + `IMPROVEMENTS_AND_RISKS.md`                                                                                       |
+| **Testes**           | 131 testes em 10 ficheiros com pytest. Todos passam sem deps externas                                                             |
 
 ---
 

@@ -1,6 +1,6 @@
 # IMPROVEMENTS AND RISKS — obsidian-rag
 
-> **Versão:** 0.3.1  
+> **Versão:** 0.4.0  
 > **Última atualização:** 2026-05-10  
 > **Âmbito:** Análise crítica de falhas, riscos, melhorias e roadmap
 
@@ -131,16 +131,16 @@ O `builder.py` injeta `OLLAMA_API_KEY=ollama` no ambiente do subprocess. Este va
 
 **Resolução (2026-05-10):** Configurados `mypy>=1.10` e `ruff>=0.4` como dependências de desenvolvimento. `[tool.mypy]` (python_version=3.11, ignore_missing_imports=true) e `[tool.ruff]` (line-length=120, select E/F/W/I) adicionados ao `pyproject.toml`.
 
-### 3.2 Sem linter/formatter configurado
+### 3.2 ~~Sem linter/formatter configurado~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                          |
 | ---------------------- | ------------------------------------------------ |
-| **Prioridade**         | Baixa                                            |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                            |
 | **Impacto**            | Baixo — inconsistências de estilo podem acumular |
 | **Complexidade**       | Baixa                                            |
 | **Ficheiros afetados** | `pyproject.toml`                                 |
 
-Não há configuração de `ruff`, `black`, `flake8` ou `isort`. O código existente é geralmente consistente, mas não há enforcing automático.
+**Resolução (2026-05-10):** `ruff>=0.4` configurado em `[tool.ruff]` com `line-length=120`, `select=["E","F","W","I"]`. Adicionado como dependência de desenvolvimento em `pyproject.toml`.
 
 ### 3.3 ~~Sem CI/CD pipeline~~ ✅ RESOLVIDO
 
@@ -153,14 +153,14 @@ Não há configuração de `ruff`, `black`, `flake8` ou `isort`. O código exist
 
 **Resolução (2026-05-10):** Criado `.github/workflows/ci.yml` com dois jobs: `lint` (ruff check + mypy) e `test` (pytest + coverage --fail-under=50). Triggers: push/PR na branch main.
 
-### 3.4 Versão hardcoded em múltiplos locais
+### 3.4 ~~Versão hardcoded em múltiplos locais~~
 
 | Campo                  | Detalhe                                                                                    |
 | ---------------------- | ------------------------------------------------------------------------------------------ |
 | **Prioridade**         | Baixa                                                                                      |
 | **Impacto**            | Baixo — risco de dessincronização de versões                                               |
 | **Complexidade**       | Baixa                                                                                      |
-| **Ficheiros afetados** | `pyproject.toml` (v0.3.0), `obsidian_rag/api/app.py` (v0.3.0 em `/health` e FastAPI title) |
+| **Ficheiros afetados** | `pyproject.toml` (v0.4.0), `obsidian_rag/api/app.py` (versão em `/health` e FastAPI title) |
 
 A versão `0.3.0` está hardcoded em pelo menos 3 locais. Deveria usar-se `importlib.metadata.version()` ou uma variável centralizada.
 
@@ -248,16 +248,16 @@ A lista de stop words é apenas em português. Queries em inglês mantêm stop w
 
 **Resolução (2026-05-10):** Adicionadas validações `min_length`/`max_length` a todos os campos string dos modelos Pydantic: `QueryRequest.query` (1–10000), `ChatMessage.role` (max 20), `ChatMessage.content` (max 50000), `ChatRequest.messages` (max 200 msgs), `ChatRequest.model` (max 100). Pydantic retorna HTTP 422 automaticamente.
 
-### 5.4 Subprocess sem sanitização de paths
+### 5.4 ~~Subprocess sem sanitização de paths~~ ✅ PARCIALMENTE RESOLVIDO
 
-| Campo                  | Detalhe                                                        |
-| ---------------------- | -------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                          |
-| **Impacto**            | Baixo — os paths vêm de `rag.toml`, controlado pelo utilizador |
-| **Complexidade**       | Baixa                                                          |
-| **Ficheiros afetados** | `obsidian_rag/graph/builder.py`                                |
+| Campo                  | Detalhe                                                         |
+| ---------------------- | --------------------------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Parcialmente resolvido                              |
+| **Impacto**            | Baixo — os paths vêm de `rag.toml`, controlado pelo utilizador  |
+| **Complexidade**       | Baixa                                                           |
+| **Ficheiros afetados** | `obsidian_rag/graph/builder.py`, `obsidian_rag/cli/init_cmd.py` |
 
-Os paths de repositórios são passados diretamente a `subprocess.run` como strings. Embora venham de configuração local, não há validação contra path traversal.
+**Melhoria (v0.4.0):** `rag init` agora valida paths contra locações perigosas (`/`, `~`, `.ssh`, `.gnupg`, `.cache`, `.local/share/Trash`, directorias de sistema). Paths em `rag.toml` passam por validação antes de serem escritos. Os paths em `builder.py` continuam sem validação runtime (risco baixo pois vêm de `rag.toml`).
 
 ### 5.5 ChromaDB telemetria desativada mas sem validação
 
@@ -369,13 +369,17 @@ O ChromaDB é adequado para o volume atual. Para vaults com dezenas de milhares 
 
 ### 9.1 Estrutura modular (positivo)
 
-O código está bem organizado em módulos temáticos (`chunking/`, `embeddings/`, `retrieval/`, `graph/`, `store/`, `api/`, `pipeline/`, `prompts/`). A separação de responsabilidades é clara.
+O código está bem organizado em módulos temáticos (`cli/`, `chunking/`, `embeddings/`, `retrieval/`, `graph/`, `store/`, `api/`, `pipeline/`, `prompts/`). A separação de responsabilidades é clara.
 
-### 9.2 Config centralizada (positivo)
+### 9.2 Config centralizada com lazy loading (positivo)
 
-Toda a configuração está em `rag.toml` com env overrides, frozen dataclasses e path resolution. Padrão sólido.
+Toda a configuração está em `rag.toml` com env overrides, frozen dataclasses e path resolution. Desde v0.4.0, `settings` é um `_LazySettings` proxy que só carrega no primeiro acesso, permitindo que `rag init` e `rag doctor` funcionem sem `rag.toml`. Helper `config_exists()` adicionado.
 
-### 9.3 Falta de `__all__` exports
+### 9.3 CLI unificado (positivo — v0.4.0)
+
+Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 comandos separados. O dispatcher em `cli/main.py` usa imports lazy para não carregar `settings` em comandos que não precisam (ex: `rag init`, `rag doctor`).
+
+### 9.4 Falta de `__all__` exports
 
 | Campo                  | Detalhe                                                          |
 | ---------------------- | ---------------------------------------------------------------- |
@@ -399,7 +403,7 @@ Os ficheiros `__init__.py` não definem `__all__`, tornando o API público de ca
 | **Complexidade**       | Média                                  |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`             |
 
-**Resolução (2026-05-10):** 107 testes implementados com pytest (83 unit iniciais + 8 funcionalidades médias + 16 integration tests com ChromaDB in-memory). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex e integration tests com TestClient + ChromaDB in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
+**Resolução (2026-05-10):** 131 testes implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation, bind validation e integration tests com TestClient + ChromaDB in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
 
 ### 10.2 ~~Autenticação da API~~ ✅ RESOLVIDO
 
@@ -506,16 +510,16 @@ O reranker está implementado mas desativado. Habilitar por defeito com cache de
 
 Adicionar stop words em inglês à lista `_PT_STOP_WORDS` ou criar lista separada `_EN_STOP_WORDS`.
 
-### 10.12 Health check do Ollama no lifespan
+### 10.12 ~~Health check do Ollama no lifespan~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                        |
 | ---------------------- | -------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                          |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                          |
 | **Impacto**            | Baixo — diagnóstico mais claro quando Ollama está indisponível |
 | **Complexidade**       | Baixa                                                          |
-| **Ficheiros afetados** | `obsidian_rag/api/app.py`                                      |
+| **Ficheiros afetados** | `obsidian_rag/cli/up_cmd.py`, `obsidian_rag/cli/doctor_cmd.py` |
 
-Adicionar verificação de conectividade ao Ollama durante o `lifespan` startup. Falhar com mensagem clara se o Ollama não estiver acessível.
+**Resolução (v0.4.0):** O `rag up` faz pre-flight checks (Ollama online, modelos disponíveis, ChromaDB acessível) antes de iniciar a API. O `rag doctor` faz diagnóstico completo com output ✓/✗ incluindo conectividade Ollama e modelos instalados.
 
 ---
 
@@ -547,20 +551,37 @@ Adicionar verificação de conectividade ao Ollama durante o `lifespan` startup.
 | D2  | ~~Backup ChromaDB com rotação~~                           | Baixa        | ✅ Concluído |
 | D3  | ~~Containerização Docker~~                                | Baixa        | ✅ Concluído |
 
-> **Fase 2 concluída em 2026-05-10.** Todas as tarefas de média prioridade foram implementadas. 107 testes (91 unit + 16 integration) passam em <1s.
+> **Fase 2 concluída em 2026-05-10.** Todas as tarefas de média prioridade foram implementadas. 131 testes passam sem deps externas.
 
 ### Fase 3 — Evolução (Baixa prioridade)
 
-| #   | Tarefa                                   | Complexidade | Estado       |
-| --- | ---------------------------------------- | ------------ | ------------ |
-| 11  | ~~Dockerfile + docker-compose~~          | Baixa        | ✅ Concluído |
-| 12  | ~~Logging estruturado (JSON)~~           | Baixa        | ✅ Concluído |
-| 13  | Habilitar reranker com cache             | Baixa        |              |
-| 14  | ~~Sync paralelo para múltiplos repos~~   | Média        | ✅ Concluído |
-| 15  | Chunking multi-linguagem (tree-sitter)   | Alta         |              |
-| 16  | Versão centralizada (importlib.metadata) | Baixa        |              |
-| 17  | Health check do Ollama no startup        | Baixa        |              |
-| 18  | Stop words bilíngues (PT + EN)           | Baixa        |              |
+| #   | Tarefa                                   | Complexidade | Estado                                          |
+| --- | ---------------------------------------- | ------------ | ----------------------------------------------- |
+| 11  | ~~Dockerfile + docker-compose~~          | Baixa        | ✅ Concluído                                    |
+| 12  | ~~Logging estruturado (JSON)~~           | Baixa        | ✅ Concluído                                    |
+| 13  | Habilitar reranker com cache             | Baixa        |                                                 |
+| 14  | ~~Sync paralelo para múltiplos repos~~   | Média        | ✅ Concluído                                    |
+| 15  | Chunking multi-linguagem (tree-sitter)   | Alta         |                                                 |
+| 16  | Versão centralizada (importlib.metadata) | Baixa        |                                                 |
+| 17  | ~~Health check do Ollama no startup~~    | Baixa        | ✅ Concluído (v0.4.0 — `rag up` + `rag doctor`) |
+| 18  | Stop words bilíngues (PT + EN)           | Baixa        |                                                 |
+
+### Fase 4 — DX e Onboarding (v0.4.0) ✅
+
+| #   | Tarefa                                                           | Complexidade | Estado       |
+| --- | ---------------------------------------------------------------- | ------------ | ------------ |
+| 19  | ~~CLI unificado (`rag` com subcommands)~~                        | Média        | ✅ Concluído |
+| 20  | ~~`rag init` — wizard interactivo com path validation~~          | Média        | ✅ Concluído |
+| 21  | ~~`rag up` — pre-flight checks + start~~                         | Baixa        | ✅ Concluído |
+| 22  | ~~`rag doctor` — diagnóstico do sistema~~                        | Baixa        | ✅ Concluído |
+| 23  | ~~`rag graph build/status` — gestao de grafos~~                  | Baixa        | ✅ Concluído |
+| 24  | ~~Config lazy loading (`_LazySettings`)~~                        | Baixa        | ✅ Concluído |
+| 25  | ~~Graphify como dep obrigatória (opt-in na execução)~~           | Baixa        | ✅ Concluído |
+| 26  | ~~`install.sh` + `Makefile`~~                                    | Baixa        | ✅ Concluído |
+| 27  | ~~Segurança: bind validation, path validation, \_EXCLUDED_DIRS~~ | Média        | ✅ Concluído |
+| 28  | ~~Testes CLI + init + security (131 total)~~                     | Média        | ✅ Concluído |
+
+> **Fase 4 concluída em 2026-05-10.** Major DX refactoring (v0.4.0): CLI unificado, wizard de setup, diagnóstico, pre-flight checks, config lazy loading, melhorias de segurança.
 
 ---
 
