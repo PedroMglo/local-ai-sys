@@ -1,7 +1,7 @@
 # IMPROVEMENTS AND RISKS — obsidian-rag
 
 > **Versão:** 0.5.0
-> **Última atualização:** 2026-05-10
+> **Última atualização:** 2026-05-11
 > **Âmbito:** Análise crítica de falhas, riscos, melhorias e roadmap
 
 ---
@@ -72,6 +72,19 @@
 
 ## 2. Problemas técnicos
 
+### 2.0 ~~`qdrant-client` ausente na imagem Docker~~ ✅ RESOLVIDO
+
+| Campo                  | Detalhe                                                              |
+| ---------------------- | -------------------------------------------------------------------- |
+| **Prioridade**         | ~~Alta~~ — Resolvido                                                 |
+| **Impacto**            | Crítico — aplicação não iniciava no Docker; `ImportError` no startup |
+| **Complexidade**       | Baixa                                                                |
+| **Ficheiros afetados** | `Dockerfile`, `requirements.txt`                                     |
+
+**Causa raiz (2026-05-11):** `rag.toml` configura `[store] backend = "qdrant"` mas o Dockerfile instalava com `pip install .`, que omite extras opcionais. `qdrant-client>=1.9` está declarado em `[project.optional-dependencies] qdrant` no `pyproject.toml`.
+
+**Resolução (2026-05-11):** Dockerfile atualizado para `pip install '.[qdrant]'`. `qdrant-client>=1.9` adicionado também a `requirements.txt` para instalações manuais.
+
 ### 2.1 ~~Estimativa de tokens por contagem de caracteres~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                                  |
@@ -130,6 +143,8 @@
 | **Ficheiros afetados** | `pyproject.toml`, todos os módulos                     |
 
 **Resolução (2026-05-10):** Configurados `mypy>=1.10` e `ruff>=0.4` como dependências de desenvolvimento. `[tool.mypy]` (python_version=3.11, ignore_missing_imports=true) e `[tool.ruff]` (line-length=120, select E/F/W/I) adicionados ao `pyproject.toml`.
+
+**Atualização (2026-05-11):** Corrigidos 15 erros de tipo reportados por mypy em 6 ficheiros: `manifest.py` (no-any-return), `governor.py` (IO[str] | None annotation), `treesitter.py` (variável `lang_module` para evitar conflito de tipo), `chroma_store.py` (type: ignore[arg-type], assert not None, dict(meta)), `migrate_cmd.py` (dict(m) para converter Mapping→dict) e `app.py` (type: ignore[dict-item], store.\_models, int(result.count)). `mypy obsidian_rag/` reporta 0 erros.
 
 ### 3.2 ~~Sem linter/formatter configurado~~ ✅ RESOLVIDO
 
