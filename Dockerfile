@@ -6,7 +6,7 @@ COPY pyproject.toml requirements.txt ./
 COPY obsidian_rag/ obsidian_rag/
 
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+    && pip install --no-cache-dir '.[qdrant]'
 
 # --- Runtime stage ---
 FROM python:3.11-slim
