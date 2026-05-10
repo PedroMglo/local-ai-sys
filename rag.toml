@@ -3,9 +3,22 @@
 # Ex: RAG_RETRIEVAL_TOP_K=15 sobrepõe [retrieval] top_k
 
 [paths]
-source_dir = "source"           # relativo à raiz do projeto
+source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
 data_dir = "data/chroma"        # relativo à raiz do projeto
-vault_dir = "~/Obsidian/Vault"  # expandido em runtime
+vault_dir = "~/Obsidian/Vault"  # fonte principal — expandido em runtime
+
+# =============================================================================
+# SYNC — como o Vault Obsidian é lido pelo pipeline
+# Backends disponíveis:
+#   direct — lê directamente de vault_dir (default, cross-platform, sem cópia)
+#   python — copia vault_dir → source_dir com shutil (cross-platform, incremental)
+#   rsync  — usa rsync para copiar (Linux/macOS, mais rápido para vaults grandes)
+#   auto   — rsync se disponível, senão python
+# =============================================================================
+[sync]
+backend = "direct"
+delete_missing = true
+follow_symlinks = false
 
 [ollama]
 base_url = "http://localhost:11434"
