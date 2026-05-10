@@ -1,6 +1,6 @@
 # IMPROVEMENTS AND RISKS — obsidian-rag
 
-> **Versão:** 0.4.0  
+> **Versão:** 0.4.1  
 > **Última atualização:** 2026-05-10  
 > **Âmbito:** Análise crítica de falhas, riscos, melhorias e roadmap
 
@@ -33,7 +33,7 @@
 | **Complexidade**       | Média                                                                 |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`                                            |
 
-**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama, ChromaDB). Faltam integration tests e CI/CD.
+**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama, ChromaDB). Total atual: 157 testes em 12 ficheiros. Faltam integration tests e2e com Ollama.
 
 ### 1.2 ~~Singletons mutáveis para coleções ChromaDB~~ ✅ RESOLVIDO
 
@@ -315,16 +315,16 @@ A pasta `source/` contém uma cópia (rsync) das notas Obsidian. Se o repositór
 
 **Resolução (2026-05-10):** `sync_repos()` agora usa `concurrent.futures.ThreadPoolExecutor` para processar repos em paralelo. Nova configuração `[pipeline] max_workers = 4` em `rag.toml`. Novo dataclass `PipelineConfig` em `config.py`.
 
-### 7.2 Embedding batch size fixo
+### 7.2 ~~Embedding batch size fixo~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                         |
 | ---------------------- | --------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                           |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                           |
 | **Impacto**            | Baixo — batch size de 50 pode não ser ótimo para todos os casos |
 | **Complexidade**       | Baixa                                                           |
 | **Ficheiros afetados** | `obsidian_rag/store/chroma.py` (`BATCH_SIZE = 50`)              |
 
-O batch size de embeddings é hardcoded em 50. Deveria ser configurável via `rag.toml`.
+**Resolução (2026-05-10):** O batch size de embeddings é agora configurável via `[performance] embedding_batch_size` em `rag.toml`. Quando `auto_tune=true` (default), o valor é ajustado automaticamente com base na RAM disponível: 25 (<8GB), 50 (8-16GB), 100 (>16GB). Novo `PerformanceConfig` em `config.py`, com auto-tuning em `tuning.py`.
 
 ### 7.3 Router LLM adiciona latência
 
@@ -403,7 +403,7 @@ Os ficheiros `__init__.py` não definem `__all__`, tornando o API público de ca
 | **Complexidade**       | Média                                  |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`             |
 
-**Resolução (2026-05-10):** 131 testes implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation, bind validation e integration tests com TestClient + ChromaDB in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
+**Resolução (2026-05-10):** 157 testes implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k). Cobertura de chunking (markdown + code), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation, bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling e integration tests com TestClient + ChromaDB in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
 
 ### 10.2 ~~Autenticação da API~~ ✅ RESOLVIDO
 
@@ -551,7 +551,7 @@ Adicionar stop words em inglês à lista `_PT_STOP_WORDS` ou criar lista separad
 | D2  | ~~Backup ChromaDB com rotação~~                           | Baixa        | ✅ Concluído |
 | D3  | ~~Containerização Docker~~                                | Baixa        | ✅ Concluído |
 
-> **Fase 2 concluída em 2026-05-10.** Todas as tarefas de média prioridade foram implementadas. 131 testes passam sem deps externas.
+> **Fase 2 concluída em 2026-05-10.** Todas as tarefas de média prioridade foram implementadas. 157 testes passam sem deps externas.
 
 ### Fase 3 — Evolução (Baixa prioridade)
 
@@ -568,20 +568,36 @@ Adicionar stop words em inglês à lista `_PT_STOP_WORDS` ou criar lista separad
 
 ### Fase 4 — DX e Onboarding (v0.4.0) ✅
 
-| #   | Tarefa                                                           | Complexidade | Estado       |
-| --- | ---------------------------------------------------------------- | ------------ | ------------ |
-| 19  | ~~CLI unificado (`rag` com subcommands)~~                        | Média        | ✅ Concluído |
-| 20  | ~~`rag init` — wizard interactivo com path validation~~          | Média        | ✅ Concluído |
-| 21  | ~~`rag up` — pre-flight checks + start~~                         | Baixa        | ✅ Concluído |
-| 22  | ~~`rag doctor` — diagnóstico do sistema~~                        | Baixa        | ✅ Concluído |
-| 23  | ~~`rag graph build/status` — gestao de grafos~~                  | Baixa        | ✅ Concluído |
-| 24  | ~~Config lazy loading (`_LazySettings`)~~                        | Baixa        | ✅ Concluído |
-| 25  | ~~Graphify como dep obrigatória (opt-in na execução)~~           | Baixa        | ✅ Concluído |
-| 26  | ~~`install.sh` + `Makefile`~~                                    | Baixa        | ✅ Concluído |
-| 27  | ~~Segurança: bind validation, path validation, \_EXCLUDED_DIRS~~ | Média        | ✅ Concluído |
-| 28  | ~~Testes CLI + init + security (131 total)~~                     | Média        | ✅ Concluído |
+| #   | Tarefa                                                                      | Complexidade | Estado       |
+| --- | --------------------------------------------------------------------------- | ------------ | ------------ |
+| 19  | ~~CLI unificado (`rag` com subcommands)~~                                   | Média        | ✅ Concluído |
+| 20  | ~~`rag init` — wizard interactivo com path validation~~                     | Média        | ✅ Concluído |
+| 21  | ~~`rag up` — pre-flight checks + start~~                                    | Baixa        | ✅ Concluído |
+| 22  | ~~`rag doctor` — diagnóstico do sistema~~                                   | Baixa        | ✅ Concluído |
+| 23  | ~~`rag graph build/status` — gestao de grafos~~                             | Baixa        | ✅ Concluído |
+| 24  | ~~Config lazy loading (`_LazySettings`)~~                                   | Baixa        | ✅ Concluído |
+| 25  | ~~Graphify como dep obrigatória (opt-in na execução)~~                      | Baixa        | ✅ Concluído |
+| 26  | ~~`install.sh` + `Makefile`~~                                               | Baixa        | ✅ Concluído |
+| 27  | ~~Segurança: bind validation, path validation, \_EXCLUDED_DIRS~~            | Média        | ✅ Concluído |
+| 28  | ~~Testes CLI + init + security + performance + adaptive top_k (157 total)~~ | Média        | ✅ Concluído |
 
 > **Fase 4 concluída em 2026-05-10.** Major DX refactoring (v0.4.0): CLI unificado, wizard de setup, diagnóstico, pre-flight checks, config lazy loading, melhorias de segurança.
+
+### Fase 5 — Performance adaptativa (v0.4.1) ✅
+
+| #   | Tarefa                                                           | Complexidade | Estado       |
+| --- | ---------------------------------------------------------------- | ------------ | ------------ |
+| 29  | ~~Auto-tuning de recursos (`detect_resources`, `auto_tune`)~~    | Média        | ✅ Concluído |
+| 30  | ~~`PerformanceConfig` + secção `[performance]` em `rag.toml`~~   | Baixa        | ✅ Concluído |
+| 31  | ~~Adaptive top_k (`_estimate_complexity` + scaling automático)~~ | Média        | ✅ Concluído |
+| 32  | ~~Proteção de recursos no sync (`should_throttle`)~~             | Média        | ✅ Concluído |
+| 33  | ~~Verificação de disco em `rag up` (<500MB recusa, <1GB avisa)~~ | Baixa        | ✅ Concluído |
+| 34  | ~~`rag doctor`: secções Recursos e Performance~~                 | Baixa        | ✅ Concluído |
+| 35  | ~~Dependência `psutil>=5.9`~~                                    | Baixa        | ✅ Concluído |
+| 36  | ~~Embedding batch size configurável via `[performance]`~~        | Baixa        | ✅ Concluído |
+| 37  | ~~26 novos testes (performance + adaptive top_k) — 157 total~~   | Média        | ✅ Concluído |
+
+> **Fase 5 concluída em 2026-05-10.** Auto-tuning de recursos, adaptive top_k, proteção de recursos no sync, verificação de disco, nova dependência `psutil`.
 
 ---
 

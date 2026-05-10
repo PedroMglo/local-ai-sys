@@ -12,7 +12,7 @@ from obsidian_rag.prompts.templates import get_context_instruction
 from obsidian_rag.retrieval.budget import allocate_budget, truncate_chunks, truncate_text
 from obsidian_rag.retrieval.intent import detect_intent_full
 from obsidian_rag.retrieval.observe import QueryTrace
-from obsidian_rag.retrieval.router import ContextMode
+from obsidian_rag.retrieval.router import _GRAPH_PATTERNS, _GRAPH_SIGNALS, ContextMode
 from obsidian_rag.store.chroma import get_client, get_collection
 
 log = logging.getLogger("obsidian_rag")
@@ -95,6 +95,27 @@ def _extract_keywords(text: str) -> str:
     words = [w.strip(".,!?:;\"'()[]") for w in text.lower().split()]
     keywords = [w for w in words if w and w not in _PT_STOP_WORDS and len(w) > 2]
     return " ".join(keywords) if keywords else text
+
+
+def _estimate_complexity(query: str) -> str:
+    """Estimate query complexity for adaptive top_k.
+
+    Returns "simple" | "normal" | "complex".
+    """
+    q_lower = query.lower()
+    words = [w for w in q_lower.split() if w.strip()]
+    word_count = len(words)
+
+    # Complex indicators
+    has_graph = bool({w.strip(".,!?") for w in words} & _GRAPH_SIGNALS) or any(p in q_lower for p in _GRAPH_PATTERNS)
+    has_boolean = any(op in q_lower for op in (" and ", " or ", " not ", " && ", " || "))
+    multi_question = q_lower.count("?") > 1
+
+    if has_graph or has_boolean or multi_question or word_count > 8:
+        return "complex"
+    if word_count <= 3:
+        return "simple"
+    return "normal"
 
 
 def _search_chroma(collection, query_text: str, n: int) -> list[tuple[str, dict, float]]:
@@ -225,20 +246,31 @@ def build_rag_context(
     code_relevant: list[tuple[str, dict, float]] = []
     graph_context_str = ""
 
+    # --- Adaptive top_k ---
+    complexity = _estimate_complexity(query)
+    trace.query_complexity = complexity
+    if complexity == "simple":
+        effective_k = max(3, cfg.top_k // 3)
+    elif complexity == "complex":
+        effective_k = min(cfg.top_k * 2, 20)
+    else:
+        effective_k = cfg.top_k
+    trace.effective_top_k = effective_k
+
     # Strategies 1-2: Notas Obsidian (vector search + keyword variant)
     if intent.use_notes:
         try:
             collection = _get_collection()
 
             # 1. Primary search
-            primary = _search_chroma(collection, query, cfg.top_k)
+            primary = _search_chroma(collection, query, effective_k)
             trace.notes_retrieved += len(primary)
 
             # 2. Keyword variant
             keywords = _extract_keywords(query)
             secondary = []
             if keywords != query.lower().strip() and len(keywords) > 3:
-                secondary = _search_chroma(collection, keywords, cfg.top_k)
+                secondary = _search_chroma(collection, keywords, effective_k)
                 trace.notes_retrieved += len(secondary)
 
             # Deduplicate + filter navigation + threshold
@@ -248,7 +280,7 @@ def build_rag_context(
                 if not _is_navigation_chunk(meta, doc)
             ]
             notes_relevant = _apply_threshold(all_notes, cfg.score_threshold, cfg.dynamic_threshold_ratio)
-            notes_relevant = notes_relevant[:cfg.top_k]
+            notes_relevant = notes_relevant[:effective_k]
 
             trace.notes_after_filter = len(notes_relevant)
             if notes_relevant:
@@ -266,20 +298,20 @@ def build_rag_context(
     if intent.use_code and settings.repos.paths:
         try:
             code_coll = _get_code_collection()
-            code_results = _search_chroma(code_coll, query, cfg.top_k)
+            code_results = _search_chroma(code_coll, query, effective_k)
             trace.code_retrieved += len(code_results)
 
             # Keyword variant para código
             keywords = _extract_keywords(query)
             if keywords != query.lower().strip() and len(keywords) > 3:
-                code_kw = _search_chroma(code_coll, keywords, cfg.top_k)
+                code_kw = _search_chroma(code_coll, keywords, effective_k)
                 code_results = code_results + code_kw
                 trace.code_retrieved += len(code_kw)
 
             # Deduplicate + threshold
             code_dedup = _deduplicate(code_results)
             code_relevant = _apply_threshold(code_dedup, cfg.score_threshold, cfg.dynamic_threshold_ratio)
-            code_relevant = code_relevant[:cfg.top_k]
+            code_relevant = code_relevant[:effective_k]
 
             trace.code_after_filter = len(code_relevant)
             if code_relevant:

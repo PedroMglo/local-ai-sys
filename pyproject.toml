@@ -12,6 +12,7 @@ dependencies = [
     "networkx>=3.0",   # leitura de graph.json do Graphify
     "slowapi>=0.1.9",  # rate limiting
     "graphifyy",       # knowledge graph (pure Python, opt-in na execução)
+    "psutil>=5.9",     # detecção de recursos (RAM, CPU, disco)
 ]
 
 [project.optional-dependencies]

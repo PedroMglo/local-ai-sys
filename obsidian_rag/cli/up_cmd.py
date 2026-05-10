@@ -57,6 +57,22 @@ def run_up() -> None:
 
     print(f"✓ Configuração carregada ({PROJECT_ROOT / 'rag.toml'})")
 
+    # 1b. Disk space check
+    import shutil
+    data_dir = settings.paths.data_dir
+    disk_path = str(data_dir if data_dir.exists() else data_dir.parent)
+    try:
+        disk_free = shutil.disk_usage(disk_path).free / (1024 ** 3)
+        if disk_free < 0.5:
+            print(f"✗ Espaço em disco insuficiente: {disk_free:.1f} GB livres em {disk_path}")
+            sys.exit(1)
+        elif disk_free < 1.0:
+            print(f"⚠ Espaço em disco baixo: {disk_free:.1f} GB livres em {disk_path}")
+        else:
+            print(f"✓ Disco: {disk_free:.1f} GB livres")
+    except Exception:
+        pass
+
     # 2. Ollama connectivity
     base_url = settings.ollama.base_url
     if not _check_ollama_running(base_url):
@@ -126,8 +142,8 @@ def run_up() -> None:
     print()
     print("Comandos úteis:")
     print(f"  curl http://localhost:{port}/health")
-    print(f'  rag query "como configurar aliases no zsh"')
-    print(f"  rag chat")
+    print('  rag query "como configurar aliases no zsh"')
+    print("  rag chat")
     print()
 
     from obsidian_rag.api.app import serve
