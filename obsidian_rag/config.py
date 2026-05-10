@@ -1,0 +1,310 @@
+"""Configuração centralizada — carrega rag.toml com suporte a env overrides."""
+
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def _find_project_root() -> Path:
+    """Walk up from this file to find rag.toml."""
+    current = Path(__file__).resolve().parent.parent
+    if (current / "rag.toml").exists():
+        return current
+    # fallback: home-based path
+    return Path.home() / "ai-local" / "obsidian-rag"
+
+
+PROJECT_ROOT = _find_project_root()
+
+
+def _load_toml() -> dict:
+    toml_path = PROJECT_ROOT / "rag.toml"
+    if not toml_path.exists():
+        raise FileNotFoundError(f"Config não encontrado: {toml_path}")
+    with open(toml_path, "rb") as f:
+        return tomllib.load(f)
+
+
+def _env_override(section: str, key: str, default):
+    """Check for env var RAG_{SECTION}_{KEY} (uppercase)."""
+    env_key = f"RAG_{section.upper()}_{key.upper()}"
+    val = os.environ.get(env_key)
+    if val is None:
+        return default
+    # Coerce to same type as default
+    if isinstance(default, bool):
+        return val.lower() in ("true", "1", "yes")
+    if isinstance(default, int):
+        return int(val)
+    if isinstance(default, float):
+        return float(val)
+    return val
+
+
+def _resolve_path(raw: str) -> Path:
+    """Resolve ~ and relative paths (relative to PROJECT_ROOT)."""
+    p = Path(os.path.expanduser(raw))
+    if not p.is_absolute():
+        p = PROJECT_ROOT / p
+    return p
+
+
+@dataclass(frozen=True)
+class PathsConfig:
+    source_dir: Path
+    data_dir: Path
+    vault_dir: Path
+
+
+@dataclass(frozen=True)
+class OllamaConfig:
+    base_url: str
+    embedding_model: str
+
+
+@dataclass(frozen=True)
+class ChunkingConfig:
+    max_chars: int
+    overlap_chars: int
+    min_chars: int
+    strip_frontmatter: bool
+    contextual_prefix: bool
+
+
+@dataclass(frozen=True)
+class RetrievalConfig:
+    top_k: int
+    score_threshold: float
+    dynamic_threshold_ratio: float
+    embedding_cache_size: int
+    context_mode: str              # "auto" | "rag_only" | "graph_only" | "both" | "none"
+    token_budget: int              # max tokens estimados no contexto
+    graph_max_neighbors: int       # vizinhos por nó no graph context
+    graph_max_communities: int     # max comunidades a injectar
+    graph_cache_ttl: int           # TTL em segundos para cache do graph
+
+
+@dataclass(frozen=True)
+class ApiConfig:
+    host: str
+    port: int
+    query_top_k: int
+    api_key: str
+    rate_limit: int          # requests per minute (0 = disabled)
+    chat_rate_limit: int     # /chat requests per minute
+
+
+@dataclass(frozen=True)
+class RepoChunkingConfig:
+    strategy: str       # "ast" | "text"
+    max_chars: int
+    overlap_chars: int
+    min_chars: int
+    contextual_prefix: bool
+
+
+@dataclass(frozen=True)
+class ReposConfig:
+    paths: tuple[Path, ...]   # repos git a indexar
+    collection_name: str      # coleção ChromaDB separada
+    chunking: RepoChunkingConfig
+
+
+@dataclass(frozen=True)
+class GraphifyConfig:
+    enabled: bool
+    backend: str        # "ollama" | "gemini" | "claude" | "openai"
+    model: str          # modelo LLM; "" = usar default do backend
+    output_dir: Path
+    graph_vault_dir: Path
+    auto_update: bool
+
+
+@dataclass(frozen=True)
+class RouterConfig:
+    enabled: bool           # use LLM router or keyword-only heuristic
+    model: str              # fast model for classification
+    timeout: float          # max seconds for LLM call
+
+
+@dataclass(frozen=True)
+class RerankerConfig:
+    enabled: bool
+    model: str
+    top_k_candidates: int   # how many candidates to evaluate
+    min_score: float        # minimum reranker score
+
+
+@dataclass(frozen=True)
+class ContextPolicyConfig:
+    min_relevance_score: float   # min best-chunk score to accept context
+    min_relevant_chunks: int     # min chunks above threshold
+    log_weak_context: bool
+
+
+@dataclass(frozen=True)
+class DebugConfig:
+    enabled: bool           # show router decisions in output
+    log_to_file: bool       # log to obsidian_rag.log
+    log_level: str          # DEBUG | INFO | WARNING
+    log_format: str         # "text" | "json"
+
+
+@dataclass(frozen=True)
+class PipelineConfig:
+    max_workers: int        # max parallel workers for repo sync
+
+
+@dataclass(frozen=True)
+class Settings:
+    paths: PathsConfig
+    ollama: OllamaConfig
+    chunking: ChunkingConfig
+    retrieval: RetrievalConfig
+    api: ApiConfig
+    repos: ReposConfig
+    graphify: GraphifyConfig
+    router: RouterConfig
+    reranker: RerankerConfig
+    context_policy: ContextPolicyConfig
+    debug: DebugConfig
+    pipeline: PipelineConfig
+    models: dict[str, bool] = field(default_factory=dict)
+
+
+def load_settings() -> Settings:
+    """Load settings from rag.toml with env var overrides."""
+    raw = _load_toml()
+
+    p = raw.get("paths", {})
+    paths = PathsConfig(
+        source_dir=_resolve_path(_env_override("paths", "source_dir", p.get("source_dir", "source"))),
+        data_dir=_resolve_path(_env_override("paths", "data_dir", p.get("data_dir", "data/chroma"))),
+        vault_dir=_resolve_path(_env_override("paths", "vault_dir", p.get("vault_dir", "~/Obsidian/Vault"))),
+    )
+
+    o = raw.get("ollama", {})
+    ollama = OllamaConfig(
+        base_url=_env_override("ollama", "base_url", o.get("base_url", "http://localhost:11434")),
+        embedding_model=_env_override("ollama", "embedding_model", o.get("embedding_model", "bge-m3")),
+    )
+
+    c = raw.get("chunking", {})
+    chunking = ChunkingConfig(
+        max_chars=_env_override("chunking", "max_chars", c.get("max_chars", 2000)),
+        overlap_chars=_env_override("chunking", "overlap_chars", c.get("overlap_chars", 200)),
+        min_chars=_env_override("chunking", "min_chars", c.get("min_chars", 50)),
+        strip_frontmatter=_env_override("chunking", "strip_frontmatter", c.get("strip_frontmatter", True)),
+        contextual_prefix=_env_override("chunking", "contextual_prefix", c.get("contextual_prefix", True)),
+    )
+
+    r = raw.get("retrieval", {})
+    retrieval = RetrievalConfig(
+        top_k=_env_override("retrieval", "top_k", r.get("top_k", 10)),
+        score_threshold=_env_override("retrieval", "score_threshold", r.get("score_threshold", 0.45)),
+        dynamic_threshold_ratio=_env_override("retrieval", "dynamic_threshold_ratio", r.get("dynamic_threshold_ratio", 0.75)),
+        embedding_cache_size=_env_override("retrieval", "embedding_cache_size", r.get("embedding_cache_size", 128)),
+        context_mode=_env_override("retrieval", "context_mode", r.get("context_mode", "auto")),
+        token_budget=_env_override("retrieval", "token_budget", r.get("token_budget", 4000)),
+        graph_max_neighbors=_env_override("retrieval", "graph_max_neighbors", r.get("graph_max_neighbors", 5)),
+        graph_max_communities=_env_override("retrieval", "graph_max_communities", r.get("graph_max_communities", 3)),
+        graph_cache_ttl=_env_override("retrieval", "graph_cache_ttl", r.get("graph_cache_ttl", 300)),
+    )
+
+    a = raw.get("api", {})
+    api = ApiConfig(
+        host=_env_override("api", "host", a.get("host", "127.0.0.1")),
+        port=_env_override("api", "port", a.get("port", 8484)),
+        query_top_k=_env_override("api", "query_top_k", a.get("query_top_k", 10)),
+        api_key=_env_override("api", "api_key", a.get("api_key", "")),
+        rate_limit=_env_override("api", "rate_limit", a.get("rate_limit", 60)),
+        chat_rate_limit=_env_override("api", "chat_rate_limit", a.get("chat_rate_limit", 20)),
+    )
+
+    rp = raw.get("repos", {})
+    rc = rp.get("chunking", {})
+    repo_chunking = RepoChunkingConfig(
+        strategy=_env_override("repos", "strategy", rc.get("strategy", "ast")),
+        max_chars=_env_override("repos", "max_chars", rc.get("max_chars", 2000)),
+        overlap_chars=_env_override("repos", "overlap_chars", rc.get("overlap_chars", 200)),
+        min_chars=_env_override("repos", "min_chars", rc.get("min_chars", 80)),
+        contextual_prefix=_env_override("repos", "contextual_prefix", rc.get("contextual_prefix", True)),
+    )
+    raw_repo_paths = _env_override("repos", "paths", rp.get("paths", []))
+    if isinstance(raw_repo_paths, str):
+        raw_repo_paths = [p.strip() for p in raw_repo_paths.split(",") if p.strip()]
+    repos = ReposConfig(
+        paths=tuple(_resolve_path(p) for p in raw_repo_paths),
+        collection_name=_env_override("repos", "collection_name", rp.get("collection_name", "code_repos")),
+        chunking=repo_chunking,
+    )
+
+    gf = raw.get("graphify", {})
+    graphify = GraphifyConfig(
+        enabled=_env_override("graphify", "enabled", gf.get("enabled", False)),
+        backend=_env_override("graphify", "backend", gf.get("backend", "ollama")),
+        model=_env_override("graphify", "model", gf.get("model", "")),
+        output_dir=_resolve_path(_env_override("graphify", "output_dir", gf.get("output_dir", "data/graphify"))),
+        graph_vault_dir=_resolve_path(_env_override("graphify", "graph_vault_dir", gf.get("graph_vault_dir", "~/Obsidian/knowledge-graphs"))),
+        auto_update=_env_override("graphify", "auto_update", gf.get("auto_update", False)),
+    )
+
+    models = raw.get("models", {})
+
+    rt = raw.get("router", {})
+    router = RouterConfig(
+        enabled=_env_override("router", "enabled", rt.get("enabled", True)),
+        model=_env_override("router", "model", rt.get("model", "gemma3:4b")),
+        timeout=_env_override("router", "timeout", rt.get("timeout", 15.0)),
+    )
+
+    rr = raw.get("reranker", {})
+    reranker = RerankerConfig(
+        enabled=_env_override("reranker", "enabled", rr.get("enabled", False)),
+        model=_env_override("reranker", "model", rr.get("model", "gemma3:4b")),
+        top_k_candidates=_env_override("reranker", "top_k_candidates", rr.get("top_k_candidates", 30)),
+        min_score=_env_override("reranker", "min_score", rr.get("min_score", 0.3)),
+    )
+
+    cp = raw.get("context_policy", {})
+    context_policy = ContextPolicyConfig(
+        min_relevance_score=_env_override("context_policy", "min_relevance_score", cp.get("min_relevance_score", 0.50)),
+        min_relevant_chunks=_env_override("context_policy", "min_relevant_chunks", cp.get("min_relevant_chunks", 1)),
+        log_weak_context=_env_override("context_policy", "log_weak_context", cp.get("log_weak_context", True)),
+    )
+
+    db = raw.get("debug", {})
+    debug = DebugConfig(
+        enabled=_env_override("debug", "enabled", db.get("enabled", False)),
+        log_to_file=_env_override("debug", "log_to_file", db.get("log_to_file", False)),
+        log_level=_env_override("debug", "log_level", db.get("log_level", "INFO")),
+        log_format=_env_override("debug", "log_format", db.get("log_format", "text")),
+    )
+
+    pl = raw.get("pipeline", {})
+    pipeline = PipelineConfig(
+        max_workers=_env_override("pipeline", "max_workers", pl.get("max_workers", 4)),
+    )
+
+    return Settings(
+        paths=paths,
+        ollama=ollama,
+        chunking=chunking,
+        retrieval=retrieval,
+        api=api,
+        repos=repos,
+        graphify=graphify,
+        router=router,
+        reranker=reranker,
+        context_policy=context_policy,
+        debug=debug,
+        pipeline=pipeline,
+        models=models,
+    )
+
+
+# Module-level singleton (loaded once on import)
+settings = load_settings()
