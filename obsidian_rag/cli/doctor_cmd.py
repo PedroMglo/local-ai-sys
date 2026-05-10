@@ -46,6 +46,42 @@ def run_doctor() -> None:
 
     print()
 
+    # 2b. System resources
+    print("─── Recursos ───")
+    try:
+        from obsidian_rag.tuning import detect_resources
+        res = detect_resources()
+
+        # RAM
+        if res.ram_percent < 80:
+            _ok(f"RAM: {res.ram_available_gb:.1f} GB livres / {res.ram_total_gb:.0f} GB total ({res.ram_percent:.0f}% em uso)")
+        elif res.ram_percent < 90:
+            _warn(f"RAM: {res.ram_available_gb:.1f} GB livres / {res.ram_total_gb:.0f} GB total ({res.ram_percent:.0f}% em uso)")
+        else:
+            _fail(f"RAM: {res.ram_available_gb:.1f} GB livres / {res.ram_total_gb:.0f} GB total ({res.ram_percent:.0f}% em uso)")
+            issues += 1
+
+        # CPU
+        _ok(f"CPU: {res.cpu_cores} cores ({res.cpu_percent:.0f}% em uso)")
+
+        # Disk
+        if res.disk_free_gb > 2:
+            _ok(f"Disco: {res.disk_free_gb:.1f} GB livres")
+        elif res.disk_free_gb > 0.5:
+            _warn(f"Disco: {res.disk_free_gb:.1f} GB livres — espaço baixo")
+        else:
+            _fail(f"Disco: {res.disk_free_gb:.1f} GB livres — espaço crítico")
+            issues += 1
+
+        # GPU
+        if res.gpu_nvidia:
+            _ok("GPU NVIDIA detectada")
+        else:
+            _ok("GPU NVIDIA: não detectada (não necessária)")
+    except Exception as e:
+        _warn(f"Detecção de recursos falhou: {e}")
+    print()
+
     # 3. Dependencies
     print("─── Dependências ───")
     deps = {
@@ -56,6 +92,7 @@ def run_doctor() -> None:
         "networkx": "networkx",
         "slowapi": "slowapi",
         "graphifyy": "graphify",  # pip package=graphifyy, import=graphify
+        "psutil": "psutil",
     }
     for name, module in deps.items():
         try:
@@ -218,6 +255,18 @@ def run_doctor() -> None:
     else:
         _warn(f"Directório graphify não existe: {output_dir}")
 
+    print()
+
+    # 9. Performance
+    print("─── Performance ───")
+    perf = settings.performance
+    if perf.auto_tune:
+        _ok("Auto-tune: activo (limites ajustados ao hardware)")
+    else:
+        _ok("Auto-tune: desactivado (valores manuais)")
+    _ok(f"Workers efectivos: {settings.pipeline.max_workers}")
+    _ok(f"Batch embeddings: {perf.embedding_batch_size}")
+    _ok(f"Limites: CPU {perf.max_cpu_percent}% / RAM {perf.max_memory_percent}%")
     print()
 
     # Summary

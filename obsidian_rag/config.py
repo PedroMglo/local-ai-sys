@@ -159,6 +159,16 @@ class PipelineConfig:
 
 
 @dataclass(frozen=True)
+class PerformanceConfig:
+    auto_tune: bool              # auto-detect resources and override limits
+    max_cpu_percent: int         # throttle sync when CPU% exceeds this
+    max_memory_percent: int      # throttle sync when RAM% exceeds this
+    max_parallel_jobs: int       # effective cap on workers (overrides pipeline.max_workers when auto_tune)
+    embedding_batch_size: int    # batch size for embedding calls
+    query_timeout_seconds: int   # max seconds for a single query
+
+
+@dataclass(frozen=True)
 class Settings:
     paths: PathsConfig
     ollama: OllamaConfig
@@ -172,6 +182,7 @@ class Settings:
     context_policy: ContextPolicyConfig
     debug: DebugConfig
     pipeline: PipelineConfig
+    performance: PerformanceConfig
     models: dict[str, bool] = field(default_factory=dict)
 
 
@@ -289,6 +300,26 @@ def load_settings() -> Settings:
         max_workers=_env_override("pipeline", "max_workers", pl.get("max_workers", 4)),
     )
 
+    pf = raw.get("performance", {})
+    performance = PerformanceConfig(
+        auto_tune=_env_override("performance", "auto_tune", pf.get("auto_tune", True)),
+        max_cpu_percent=_env_override("performance", "max_cpu_percent", pf.get("max_cpu_percent", 75)),
+        max_memory_percent=_env_override("performance", "max_memory_percent", pf.get("max_memory_percent", 80)),
+        max_parallel_jobs=_env_override("performance", "max_parallel_jobs", pf.get("max_parallel_jobs", 4)),
+        embedding_batch_size=_env_override("performance", "embedding_batch_size", pf.get("embedding_batch_size", 50)),
+        query_timeout_seconds=_env_override("performance", "query_timeout_seconds", pf.get("query_timeout_seconds", 30)),
+    )
+
+    # Auto-tune: adjust limits based on detected hardware
+    if performance.auto_tune:
+        from obsidian_rag.tuning import auto_tune
+        performance = auto_tune(performance)
+
+    # Effective max_workers = min(pipeline setting, performance cap)
+    effective_workers = min(pipeline.max_workers, performance.max_parallel_jobs)
+    if effective_workers != pipeline.max_workers:
+        pipeline = PipelineConfig(max_workers=effective_workers)
+
     return Settings(
         paths=paths,
         ollama=ollama,
@@ -302,6 +333,7 @@ def load_settings() -> Settings:
         context_policy=context_policy,
         debug=debug,
         pipeline=pipeline,
+        performance=performance,
         models=models,
     )
 

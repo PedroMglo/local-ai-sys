@@ -1,6 +1,6 @@
 # PROJECT OVERVIEW — obsidian-rag
 
-> **Versão:** 0.4.0  
+> **Versão:** 0.4.1  
 > **Última atualização:** 2026-05-10  
 > **Linguagem:** Python ≥ 3.11  
 > **Licença:** A confirmar
@@ -9,25 +9,55 @@
 
 ## Índice
 
-1. [Objetivo principal](#objetivo-principal)
-2. [Problema que o projeto resolve](#problema-que-o-projeto-resolve)
-3. [Casos de uso principais](#casos-de-uso-principais)
-4. [Arquitetura geral](#arquitetura-geral)
-5. [Estrutura de pastas e ficheiros](#estrutura-de-pastas-e-ficheiros)
-6. [Fluxo de funcionamento](#fluxo-de-funcionamento)
-7. [Componentes principais](#componentes-principais)
-8. [Modelos de AI/LLMs utilizados](#modelos-de-aillms-utilizados)
-9. [Integração com Ollama](#integração-com-ollama)
-10. [APIs e endpoints](#apis-e-endpoints)
-11. [CLI — Entry Points](#cli--entry-points)
-12. [Dependências principais](#dependências-principais)
-13. [Tecnologias usadas](#tecnologias-usadas)
-14. [Como executar o projeto localmente](#como-executar-o-projeto-localmente)
-15. [Como configurar o ambiente](#como-configurar-o-ambiente)
-16. [Como testar funcionalidades](#como-testar-funcionalidades)
-17. [Limitações conhecidas](#limitações-conhecidas)
-18. [Estado atual do projeto](#estado-atual-do-projeto)
-19. [Regra de manutenção da documentação](#regra-de-manutenção-da-documentação)
+- [PROJECT OVERVIEW — obsidian-rag](#project-overview--obsidian-rag)
+  - [Índice](#índice)
+  - [Objetivo principal](#objetivo-principal)
+  - [Problema que o projeto resolve](#problema-que-o-projeto-resolve)
+  - [Casos de uso principais](#casos-de-uso-principais)
+  - [Arquitetura geral](#arquitetura-geral)
+  - [Estrutura de pastas e ficheiros](#estrutura-de-pastas-e-ficheiros)
+  - [Fluxo de funcionamento](#fluxo-de-funcionamento)
+    - [1. Sincronização (`rag sync`)](#1-sincronização-rag-sync)
+    - [2. Query (`rag query`, `/query`, `/query/code`)](#2-query-rag-query-query-querycode)
+    - [3. Chat RAG-augmented (`rag chat`, `/chat`)](#3-chat-rag-augmented-rag-chat-chat)
+  - [Componentes principais](#componentes-principais)
+    - [Chunking (`obsidian_rag/chunking/`)](#chunking-obsidian_ragchunking)
+    - [Embeddings (`obsidian_rag/embeddings/`)](#embeddings-obsidian_ragembeddings)
+    - [Store (`obsidian_rag/store/`)](#store-obsidian_ragstore)
+    - [Retrieval (`obsidian_rag/retrieval/`)](#retrieval-obsidian_ragretrieval)
+    - [Graph (`obsidian_rag/graph/`)](#graph-obsidian_raggraph)
+    - [API (`obsidian_rag/api/`)](#api-obsidian_ragapi)
+    - [CLI unificado (`obsidian_rag/cli/`) — v0.4.0](#cli-unificado-obsidian_ragcli--v040)
+    - [Pipeline (`obsidian_rag/pipeline/`)](#pipeline-obsidian_ragpipeline)
+    - [Auto-tuning (`obsidian_rag/tuning.py`)](#auto-tuning-obsidian_ragtuningpy)
+    - [Prompts (`obsidian_rag/prompts/`)](#prompts-obsidian_ragprompts)
+  - [Modelos de AI/LLMs utilizados](#modelos-de-aillms-utilizados)
+  - [Integração com Ollama](#integração-com-ollama)
+  - [APIs e endpoints](#apis-e-endpoints)
+  - [CLI — Comando unificado `rag`](#cli--comando-unificado-rag)
+    - [Shell helpers (zsh)](#shell-helpers-zsh)
+  - [Dependências principais](#dependências-principais)
+    - [Obrigatórias](#obrigatórias)
+    - [Desenvolvimento](#desenvolvimento)
+    - [Stdlib utilizada](#stdlib-utilizada)
+  - [Tecnologias usadas](#tecnologias-usadas)
+  - [Como executar o projeto localmente](#como-executar-o-projeto-localmente)
+    - [Pré-requisitos](#pré-requisitos)
+    - [Instalação](#instalação)
+    - [Configuração inicial](#configuração-inicial)
+    - [Uso](#uso)
+    - [Makefile (atalhos)](#makefile-atalhos)
+    - [Environment overrides](#environment-overrides)
+    - [Execução com Docker](#execução-com-docker)
+  - [Como configurar o ambiente](#como-configurar-o-ambiente)
+    - [Ficheiro principal: `rag.toml`](#ficheiro-principal-ragtoml)
+    - [Scheduler (systemd)](#scheduler-systemd)
+  - [Como testar funcionalidades](#como-testar-funcionalidades)
+    - [Testes manuais](#testes-manuais)
+    - [Testes automatizados](#testes-automatizados)
+  - [Limitações conhecidas](#limitações-conhecidas)
+  - [Estado atual do projeto](#estado-atual-do-projeto)
+  - [Regra de manutenção da documentação](#regra-de-manutenção-da-documentação)
 
 ---
 
@@ -104,7 +134,7 @@ O **obsidian-rag** é um pipeline de RAG (Retrieval-Augmented Generation) 100% l
 ```
 obsidian-rag/
 ├── pyproject.toml              # Package config, dependências, entry point único `rag`
-├── rag.toml                    # Configuração central (todas as opções)
+├── rag.toml                    # Configuração central (todas as opções, incl. [performance])
 ├── requirements.txt            # Dependências mínimas
 ├── README.md                   # Documentação (reescrito em v0.4.0)
 ├── Makefile                    # Atalhos: make install, init, up, serve, sync, test, etc.
@@ -114,7 +144,7 @@ obsidian-rag/
 ├── docs/                       # Documentação técnica detalhada
 │   ├── PROJECT_OVERVIEW.md     # Este ficheiro
 │   └── IMPROVEMENTS_AND_RISKS.md
-├── tests/                      # Testes automatizados (pytest) — 131 testes
+├── tests/                      # Testes automatizados (pytest) — 157 testes
 │   ├── __init__.py
 │   ├── conftest.py             # Fixtures partilhadas
 │   ├── test_api.py             # Testes de auth middleware e /health
@@ -126,6 +156,8 @@ obsidian-rag/
 │   ├── test_router.py          # Testes de heurística do router
 │   ├── test_security.py        # Testes de segurança (bind validation, _EXCLUDED_DIRS, etc.)
 │   ├── test_medium_features.py # Backup, logging JSON, config, tokenizer
+│   ├── test_performance.py     # PerformanceConfig, auto_tune, throttle, workers capping
+│   ├── test_adaptive_topk.py   # Complexidade de queries, adaptive top_k scaling
 │   └── test_integration.py     # Integration tests: endpoints + ChromaDB in-memory
 ├── .github/
 │   ├── agents/                 # Agentes VS Code Copilot
@@ -141,7 +173,8 @@ obsidian-rag/
 │       └── SPEECH-LAB/graphify-out/
 ├── obsidian_rag/               # Código principal
 │   ├── __init__.py
-│   ├── config.py               # _LazySettings proxy, config_exists(), env overrides, dataclasses
+│   ├── config.py               # _LazySettings proxy, config_exists(), env overrides, dataclasses (incl. PerformanceConfig)
+│   ├── tuning.py               # Auto-tuning: detect_resources(), auto_tune(), should_throttle()
 │   ├── cli/                    # CLI unificado (v0.4.0)
 │   │   ├── __init__.py
 │   │   ├── main.py             # Dispatcher `rag` — argparse com subcommands
@@ -240,16 +273,20 @@ rag sync --all:
    ├── RAG_AND_GRAPH → ambos
    └── CLARIFY → pede esclarecimento ao utilizador
 4. Router: 2 camadas — LLM (gemma3:4b, 15s timeout) → keyword heuristic fallback
-5. Pesquisa multi-estratégia:
+5. Adaptive top_k:
+   - `_estimate_complexity(query)` classifica a query como "simple" | "normal" | "complex"
+   - simple → top_k // 3 (mín. 3); normal → top_k inalterado; complex → top_k × 2 (máx. 20)
+   - Registado em `QueryTrace.query_complexity` e `QueryTrace.effective_top_k`
+6. Pesquisa multi-estratégia:
    a. Primária: vector search (notas + código)
    b. Secundária: keyword search (sem stop words PT)
    c. Terciária: title-based search
-6. Deduplicação por (source_path, section_header, chunk_index)
-7. Dynamic threshold: max(0.45, best_score × 0.75)
-8. Reranker opcional (cross-encoder via gemma3:4b, disabled por defeito)
-9. Relevance gate: contexto descartado se best score < 0.50 ou < 1 chunk
-10. Token budget allocation: 4000 tokens, split 40/40/20 (notas/código/grafo)
-11. Injeta contexto como system message → stream para Ollama → resposta ao utilizador
+7. Deduplicação por (source_path, section_header, chunk_index)
+8. Dynamic threshold: max(0.45, best_score × 0.75)
+9. Reranker opcional (cross-encoder via gemma3:4b, disabled por defeito)
+10. Relevance gate: contexto descartado se best score < 0.50 ou < 1 chunk
+11. Token budget allocation: 4000 tokens, split 40/40/20 (notas/código/grafo)
+12. Injeta contexto como system message → stream para Ollama → resposta ao utilizador
 ```
 
 ## Componentes principais
@@ -275,15 +312,15 @@ rag sync --all:
 
 ### Retrieval (`obsidian_rag/retrieval/`)
 
-| Módulo             | Função                                                                                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `rag.py`           | `build_rag_context()` — entry point. Multi-estratégia: vector + keyword + title. Deduplicação, threshold dinâmico, relevance gate                            |
-| `router.py`        | `ContextMode` enum (NO_CONTEXT, RAG_ONLY, GRAPH_ONLY, RAG_AND_GRAPH, CLARIFY). LLM router (gemma3:4b) com keyword heuristic fallback                         |
-| `intent.py`        | Mapeia `ContextMode` → `QueryIntent(use_notes, use_code, use_graph)`                                                                                         |
-| `budget.py`        | Alocação de token budget: 40/40/20 (notas/código/grafo), trunca por chunks inteiros. Tokenizer regex word-boundary com multiplicador 1.3×                    |
-| `reranker.py`      | Cross-encoder opcional via Ollama. Score 0-10, combina 60% reranker + 40% vector. Disabled por defeito                                                       |
-| `graph_context.py` | Constrói bloco de contexto do grafo: nós, comunidades, vizinhos (calls, imports_from, uses), god nodes                                                       |
-| `observe.py`       | `QueryTrace` — captura toda a cadeia de decisão: routing, retrieval, scoring, timing. `_JsonFormatter` para logging JSON estruturado (ficheiro e/ou consola) |
+| Módulo             | Função                                                                                                                                                                      |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rag.py`           | `build_rag_context()` — entry point. Adaptive top_k (`_estimate_complexity`). Multi-estratégia: vector + keyword + title. Deduplicação, threshold dinâmico, relevance gate  |
+| `router.py`        | `ContextMode` enum (NO_CONTEXT, RAG_ONLY, GRAPH_ONLY, RAG_AND_GRAPH, CLARIFY). LLM router (gemma3:4b) com keyword heuristic fallback                                        |
+| `intent.py`        | Mapeia `ContextMode` → `QueryIntent(use_notes, use_code, use_graph)`                                                                                                        |
+| `budget.py`        | Alocação de token budget: 40/40/20 (notas/código/grafo), trunca por chunks inteiros. Tokenizer regex word-boundary com multiplicador 1.3×                                   |
+| `reranker.py`      | Cross-encoder opcional via Ollama. Score 0-10, combina 60% reranker + 40% vector. Disabled por defeito                                                                      |
+| `graph_context.py` | Constrói bloco de contexto do grafo: nós, comunidades, vizinhos (calls, imports_from, uses), god nodes                                                                      |
+| `observe.py`       | `QueryTrace` — captura toda a cadeia de decisão: routing, retrieval, scoring, timing, `query_complexity`, `effective_top_k`. `_JsonFormatter` para logging JSON estruturado |
 
 ### Graph (`obsidian_rag/graph/`)
 
@@ -310,19 +347,27 @@ rag sync --all:
 | --------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `main.py`       | Dispatcher `rag` — argparse com subcommands. Imports lazy para não carregar `settings` desnecessariamente         |
 | `init_cmd.py`   | `rag init` — wizard interactivo: gera `rag.toml`, detecta vault/Git, lista modelos Ollama, valida paths perigosos |
-| `up_cmd.py`     | `rag up` — pre-flight checks (Ollama, modelos, ChromaDB) + `serve()`                                              |
-| `doctor_cmd.py` | `rag doctor` — diagnóstico ✓/✗ (Python, deps, config, paths, Ollama, ChromaDB, Graphify)                          |
-| `graph_cmd.py`  | `rag graph build [--force] [--repo]` + `rag graph status`                                                         |
+| `up_cmd.py`     | `rag up` — pre-flight checks (Ollama, modelos, ChromaDB, disco) + `serve()`. Recusa iniciar com <500MB livres     |
+| `doctor_cmd.py` | `rag doctor` — diagnóstico ✓/✗ (Python, deps, config, paths, Ollama, ChromaDB, Graphify, Recursos, Performance)   |
+| `graph_cmd.py`  | `rag graph build [--force] [--repo]` + `rag graph status`. `--force` ignora cache incremental                     |
 | `_query.py`     | `rag query` — wrapper delegando a `api.cli`                                                                       |
 | `_chat.py`      | `rag chat` — wrapper delegando a `api.chat_cli`                                                                   |
 | `_backup.py`    | `rag backup` — wrapper delegando a `pipeline.backup`                                                              |
 
 ### Pipeline (`obsidian_rag/pipeline/`)
 
-| Módulo      | Função                                                                                                                      |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `sync.py`   | Três modos: `-l` (notas + repos), `-g` (graphify), `--all`. Sync paralelo de repos com `ThreadPoolExecutor` (max_workers=4) |
-| `backup.py` | Backup timestamped do ChromaDB (`shutil.copytree`) com rotação (mantém últimas 3 cópias)                                    |
+| Módulo      | Função                                                                                                                                                                                                                  |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sync.py`   | Três modos: `-l` (notas + repos), `-g` (graphify), `--all`. Sync paralelo com `ThreadPoolExecutor`. Proteção de recursos via `should_throttle()`: pausa com RAM alta, reduz workers com CPU alta, aborta com disco <1GB |
+| `backup.py` | Backup timestamped do ChromaDB (`shutil.copytree`) com rotação (mantém últimas 3 cópias)                                                                                                                                |
+
+### Auto-tuning (`obsidian_rag/tuning.py`)
+
+| Função                  | Descrição                                                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `detect_resources()`    | Detecta RAM (total/disponível/%), CPU (cores/%), disco (GB livres), GPU (nvidia-smi) via `psutil`                                          |
+| `auto_tune(perf)`       | Ajusta `max_parallel_jobs` e `embedding_batch_size` com base no hardware. Chamado em `load_settings()` quando `auto_tune=True`             |
+| `should_throttle(perf)` | Advisory para o sync pipeline: `pause_sync` (RAM alta), `reduce_workers` (CPU alta), `low_disk` (<1GB). Chamado antes de cada repo no sync |
 
 ### Prompts (`obsidian_rag/prompts/`)
 
@@ -383,8 +428,8 @@ Desde a v0.4.0, todos os 5 entry points antigos (`rag-sync`, `rag-serve`, `rag-q
 | Comando                                                  | Descrição                                                                                                                                                |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `rag init`                                               | Wizard interactivo: gera `rag.toml`, detecta vault Obsidian e repos Git, lista modelos Ollama, valida paths perigosos, força `api_key` se bind `0.0.0.0` |
-| `rag up`                                                 | Pre-flight checks (Ollama online, modelos disponíveis, ChromaDB acessível) → inicia API                                                                  |
-| `rag doctor`                                             | Diagnóstico do sistema com output ✓/✗ (Python, deps, config, paths, Ollama, ChromaDB, Graphify)                                                          |
+| `rag up`                                                 | Pre-flight checks (Ollama, modelos, ChromaDB, disco ≥500MB) → inicia API. Avisa com <1GB livres                                                          |
+| `rag doctor`                                             | Diagnóstico do sistema com output ✓/✗ (Python, deps, config, paths, Ollama, ChromaDB, Graphify, Recursos, Performance)                                   |
 | `rag sync -l`                                            | Sincroniza embeddings de notas + repos (incremental, paralelo)                                                                                           |
 | `rag sync -g [--force]`                                  | Constrói knowledge graphs via Graphify                                                                                                                   |
 | `rag sync --all`                                         | Executa `-l` seguido de `-g`                                                                                                                             |
@@ -418,6 +463,7 @@ Desde a v0.4.0, todos os 5 entry points antigos (`rag-sync`, `rag-serve`, `rag-q
 | `httpx`             | ≥ 0.27  | Cliente HTTP assíncrono (Ollama)                                                                               |
 | `networkx`          | ≥ 3.0   | Leitura e query de grafos (graph.json)                                                                         |
 | `slowapi`           | ≥ 0.1.9 | Rate limiting na API                                                                                           |
+| `psutil`            | ≥ 5.9   | Detecção de recursos (RAM, CPU, disco) para auto-tuning e throttling                                           |
 | `graphifyy`         | —       | Knowledge graphs (AST + LLM). Pure Python (`py3-none-any`). Opt-in na execução (`enabled = false` por defeito) |
 
 > **Nota (v0.4.0):** `graphifyy` foi promovido de dependência opcional a obrigatória. É um pacote pure Python leve, instalado sempre, mas a execução de grafos continua opt-in via `[graphify] enabled` em `rag.toml`.
@@ -443,6 +489,7 @@ Desde a v0.4.0, todos os 5 entry points antigos (`rag-sync`, `rag-serve`, `rag-q
 | `secrets`                    | Comparação timing-safe de API keys (`compare_digest`)    |
 | `re`                         | Tokenizer regex word-boundary (`budget.py`)              |
 | `concurrent.futures`         | ThreadPoolExecutor para sync paralelo de repos           |
+| `shutil.disk_usage`          | Verificação de espaço em disco (`rag up`, `tuning.py`)   |
 | `shutil`                     | Cópia de diretórios ChromaDB para backup                 |
 | `json` / `logging.Formatter` | Logging estruturado JSON (`observe.py`)                  |
 
@@ -575,21 +622,22 @@ O `docker-compose.yml` monta `./data` como volume e configura `extra_hosts: host
 
 ### Ficheiro principal: `rag.toml`
 
-| Secção             | Opções-chave                                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `[paths]`          | `source_dir`, `data_dir`, `vault_dir`                                                                              |
-| `[ollama]`         | `base_url`, `embedding_model`                                                                                      |
-| `[chunking]`       | `max_chars=2000`, `overlap_chars=200`, `min_chars=50`, `contextual_prefix=true`                                    |
-| `[retrieval]`      | `top_k=10`, `score_threshold=0.45`, `dynamic_threshold_ratio=0.75`, `token_budget=4000`, `context_mode=auto`       |
-| `[api]`            | `host=127.0.0.1`, `port=8484`, `api_key=""` (vazio = sem auth; override: `RAG_API_API_KEY`)                        |
-| `[models]`         | Per-model RAG toggle (ex: `"coder-pt" = false`)                                                                    |
-| `[router]`         | `enabled=true`, `model=gemma3:4b`, `timeout=15.0`                                                                  |
-| `[reranker]`       | `enabled=false`, `model=gemma3:4b`, `top_k_candidates=30`                                                          |
-| `[context_policy]` | `min_relevance_score=0.50`, `min_relevant_chunks=1`                                                                |
-| `[debug]`          | `enabled=false`, `log_to_file=false`, `log_level=INFO`, `log_format="text"` (ou `"json"` para logging estruturado) |
-| `[repos]`          | `paths=[...]`, `collection_name=code_repos`                                                                        |
-| `[pipeline]`       | `max_workers=4` — número de threads para sync paralelo de repos                                                    |
-| `[graphify]`       | `enabled=true`, `backend=ollama`, `model=deepseek-r1:8b`, `output_dir=data/graphify`                               |
+| Secção             | Opções-chave                                                                                                                                  |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[paths]`          | `source_dir`, `data_dir`, `vault_dir`                                                                                                         |
+| `[ollama]`         | `base_url`, `embedding_model`                                                                                                                 |
+| `[chunking]`       | `max_chars=2000`, `overlap_chars=200`, `min_chars=50`, `contextual_prefix=true`                                                               |
+| `[retrieval]`      | `top_k=10`, `score_threshold=0.45`, `dynamic_threshold_ratio=0.75`, `token_budget=4000`, `context_mode=auto`                                  |
+| `[api]`            | `host=127.0.0.1`, `port=8484`, `api_key=""` (vazio = sem auth; override: `RAG_API_API_KEY`)                                                   |
+| `[models]`         | Per-model RAG toggle (ex: `"coder-pt" = false`)                                                                                               |
+| `[router]`         | `enabled=true`, `model=gemma3:4b`, `timeout=15.0`                                                                                             |
+| `[reranker]`       | `enabled=false`, `model=gemma3:4b`, `top_k_candidates=30`                                                                                     |
+| `[context_policy]` | `min_relevance_score=0.50`, `min_relevant_chunks=1`                                                                                           |
+| `[debug]`          | `enabled=false`, `log_to_file=false`, `log_level=INFO`, `log_format="text"` (ou `"json"` para logging estruturado)                            |
+| `[repos]`          | `paths=[...]`, `collection_name=code_repos`                                                                                                   |
+| `[pipeline]`       | `max_workers=4` — número de threads para sync paralelo de repos (capado por `performance.max_parallel_jobs`)                                  |
+| `[performance]`    | `auto_tune=true`, `max_cpu_percent=75`, `max_memory_percent=80`, `max_parallel_jobs=4`, `embedding_batch_size=50`, `query_timeout_seconds=30` |
+| `[graphify]`       | `enabled=true`, `backend=ollama`, `model=deepseek-r1:8b`, `output_dir=data/graphify`                                                          |
 
 ### Scheduler (systemd)
 
@@ -637,7 +685,7 @@ pytest tests/test_chunking_markdown.py
 pytest tests/test_api.py -v
 ```
 
-**131 testes** em 10 ficheiros, sem dependências externas (Ollama, ChromaDB):
+**157 testes** em 12 ficheiros, sem dependências externas (Ollama, ChromaDB):
 
 | Ficheiro                    | Testes | Cobertura                                                                                          |
 | --------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
@@ -650,42 +698,44 @@ pytest tests/test_api.py -v
 | `test_init.py`              | —      | `rag init`: validação de paths perigosos, geração de rag.toml                                      |
 | `test_security.py`          | —      | Bind validation (`0.0.0.0` sem key), `_EXCLUDED_DIRS`, sanitização de paths                        |
 | `test_medium_features.py`   | 25     | Backup, sync paralelo, logging JSON, tokenizer regex, configurações pipeline/debug                 |
+| `test_performance.py`       | 10     | `PerformanceConfig` defaults, `auto_tune` logic, `should_throttle`, workers capping, retrocompat   |
+| `test_adaptive_topk.py`     | 16     | `_estimate_complexity`, adaptive top_k scaling (simple/normal/complex)                             |
 | `test_integration.py`       | 16     | `/query`, `/query/code`, `/stats` com ChromaDB in-memory, validação Pydantic (422)                 |
 
 Fixtures partilhadas em `conftest.py`: `tmp_source_dir`, `sample_markdown_note`, `navigation_note`, `sample_python_source`.
 
 ## Limitações conhecidas
 
-| Limitação                         | Descrição                                                                                                                           |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| **Cobertura de testes parcial**   | 131 testes (unit + integration) cobrindo chunking, router, budget, API auth, CLI, segurança, endpoints. Faltam e2e tests com Ollama |
-| **Chunking AST só para Python**   | Repositórios com outras linguagens usam fallback textual (menos preciso)                                                            |
-| **Reranker disabled por defeito** | Adicionaria latência mas melhoraria precisão. Desativado por performance                                                            |
-| **Auth opcional na API**          | API key auth disponível (`Bearer`) mas desativada por defeito (campo `api_key` vazio)                                               |
-| **Graphify depende de LLM**       | A extração semântica de grafos requer chamadas ao Ollama, que pode ser lento                                                        |
-| **Single-user**                   | A arquitetura não suporta múltiplos utilizadores concorrentes de forma otimizada                                                    |
-| **Stop words apenas em PT**       | A lista de stop words para keyword search é apenas em português                                                                     |
+| Limitação                         | Descrição                                                                                                                                                        |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cobertura de testes parcial**   | 157 testes (unit + integration) cobrindo chunking, router, budget, API auth, CLI, segurança, performance, adaptive top_k, endpoints. Faltam e2e tests com Ollama |
+| **Chunking AST só para Python**   | Repositórios com outras linguagens usam fallback textual (menos preciso)                                                                                         |
+| **Reranker disabled por defeito** | Adicionaria latência mas melhoraria precisão. Desativado por performance                                                                                         |
+| **Auth opcional na API**          | API key auth disponível (`Bearer`) mas desativada por defeito (campo `api_key` vazio)                                                                            |
+| **Graphify depende de LLM**       | A extração semântica de grafos requer chamadas ao Ollama, que pode ser lento                                                                                     |
+| **Single-user**                   | A arquitetura não suporta múltiplos utilizadores concorrentes de forma otimizada                                                                                 |
+| **Stop words apenas em PT**       | A lista de stop words para keyword search é apenas em português                                                                                                  |
 
 ## Estado atual do projeto
 
-| Aspeto               | Estado                                                                                                                            |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Versão**           | 0.4.0                                                                                                                             |
-| **Maturidade**       | Funcional para uso pessoal. Containerizado com Docker. Não é production-ready para deployment multi-utilizador                    |
-| **Pipeline RAG**     | Completo e funcional: chunking → embeddings → ChromaDB → retrieval multi-estratégia. Sync paralelo de repos                       |
-| **Knowledge graphs** | Funcional com Graphify (agora dep obrigatória, opt-in na execução). Enrichment + Mermaid + export Obsidian                        |
-| **API**              | 9 endpoints REST funcionais + streaming chat. Bind validation de segurança em `serve()`                                           |
-| **CLI**              | Comando unificado `rag` com 11 subcomandos (init, up, doctor, sync, serve, query, chat, backup, graph build/status) + helpers zsh |
-| **DX**               | `install.sh` + `Makefile` + `rag init` wizard + `rag doctor` diagnóstico + `rag up` pre-flight                                    |
-| **Config**           | `_LazySettings` proxy — config só carrega no primeiro acesso. `rag init` e `rag doctor` funcionam sem `rag.toml`                  |
-| **Router**           | LLM (gemma3:4b) + keyword heuristic fallback — funcional                                                                          |
-| **Reranker**         | Implementado mas desativado por defeito                                                                                           |
-| **Observabilidade**  | `QueryTrace` com decisões completas. Logging JSON estruturado (ficheiro/consola). Debug mode via `--debug`                        |
-| **Backup**           | `rag backup` — backup timestamped do ChromaDB com rotação automática (3 cópias)                                                   |
-| **Docker**           | `Dockerfile` multi-stage + `docker-compose.yml`. `CMD ["rag", "serve"]`. Porta 8000, volume `data/`                               |
-| **Segurança**        | Bind validation, path validation (paths perigosos), `_EXCLUDED_DIRS`, API key + rate limiting                                     |
-| **Documentação**     | Este ficheiro + `IMPROVEMENTS_AND_RISKS.md`                                                                                       |
-| **Testes**           | 131 testes em 10 ficheiros com pytest. Todos passam sem deps externas                                                             |
+| Aspeto               | Estado                                                                                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Versão**           | 0.4.1                                                                                                                                          |
+| **Maturidade**       | Funcional para uso pessoal. Containerizado com Docker. Não é production-ready para deployment multi-utilizador                                 |
+| **Pipeline RAG**     | Completo e funcional: chunking → embeddings → ChromaDB → retrieval multi-estratégia com adaptive top_k. Sync paralelo com proteção de recursos |
+| **Knowledge graphs** | Funcional com Graphify (agora dep obrigatória, opt-in na execução). Enrichment + Mermaid + export Obsidian                                     |
+| **API**              | 9 endpoints REST funcionais + streaming chat. Bind validation de segurança em `serve()`                                                        |
+| **CLI**              | Comando unificado `rag` com 11 subcomandos (init, up, doctor, sync, serve, query, chat, backup, graph build/status) + helpers zsh              |
+| **DX**               | `install.sh` + `Makefile` + `rag init` wizard + `rag doctor` diagnóstico + `rag up` pre-flight                                                 |
+| **Config**           | `_LazySettings` proxy — config só carrega no primeiro acesso. `rag init` e `rag doctor` funcionam sem `rag.toml`                               |
+| **Router**           | LLM (gemma3:4b) + keyword heuristic fallback — funcional                                                                                       |
+| **Reranker**         | Implementado mas desativado por defeito                                                                                                        |
+| **Observabilidade**  | `QueryTrace` com decisões completas + `query_complexity`/`effective_top_k`. Logging JSON. Auto-tune logging. Debug mode `--debug`              |
+| **Backup**           | `rag backup` — backup timestamped do ChromaDB com rotação automática (3 cópias)                                                                |
+| **Docker**           | `Dockerfile` multi-stage + `docker-compose.yml`. `CMD ["rag", "serve"]`. Porta 8000, volume `data/`                                            |
+| **Segurança**        | Bind validation, path validation (paths perigosos), `_EXCLUDED_DIRS`, API key + rate limiting, disk space checks                               |
+| **Documentação**     | Este ficheiro + `IMPROVEMENTS_AND_RISKS.md`                                                                                                    |
+| **Testes**           | 157 testes em 12 ficheiros com pytest. Todos passam sem deps externas                                                                          |
 
 ---
 

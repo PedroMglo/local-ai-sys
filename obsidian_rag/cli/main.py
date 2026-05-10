@@ -77,7 +77,9 @@ def main() -> None:
     p_graph = sub.add_parser("graph", help="Knowledge graph (Graphify)")
     graph_sub = p_graph.add_subparsers(dest="graph_command", help="Subcomando do graph")
     p_graph_build = graph_sub.add_parser("build", help="Construir grafos")
-    p_graph_build.add_argument("--force", action="store_true", help="Rebuild completo")
+    p_graph_build.add_argument("--force", action="store_true", help="Rebuild completo (ignora cache incremental)")
+    p_graph_build.add_argument("--changed-only", action="store_true", default=True,
+                               help="Só processar ficheiros alterados (default — graphify detecta via manifest)")
     p_graph_build.add_argument("--repo", metavar="NOME", help="Repo específico")
     graph_sub.add_parser("status", help="Estado dos grafos")
 

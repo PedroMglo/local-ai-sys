@@ -67,7 +67,32 @@ def sync_repos() -> None:
         print("==> [Repos] Nenhum repo válido encontrado.")
         return
 
+    # --- Resource protection ---
+    from obsidian_rag.tuning import should_throttle
+
+    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+    if advice.low_disk:
+        print(f"✗ [Repos] Disco quase cheio — sync abortado. {advice.reason}")
+        return
+
     max_workers = min(settings.pipeline.max_workers, len(valid_paths))
+
+    if advice.pause_sync:
+        import time as _time
+        print(f"⚠ [Repos] Sistema sob pressão: {advice.reason}")
+        for attempt in range(1, 4):
+            print(f"    Pausa {attempt}/3 — a aguardar 5s...")
+            _time.sleep(5)
+            advice = should_throttle(settings.performance, str(settings.paths.data_dir))
+            if not advice.pause_sync:
+                break
+        else:
+            max_workers = max(1, max_workers // 2)
+            print(f"    Pressão mantém-se — a reduzir workers para {max_workers}")
+
+    if advice.reduce_workers:
+        max_workers = max(1, max_workers // 2)
+        print(f"⚠ [Repos] Workers reduzidos para {max_workers}: {advice.reason}")
     all_repo_chunks = []
 
     if max_workers <= 1:

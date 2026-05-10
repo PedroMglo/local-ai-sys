@@ -29,6 +29,10 @@ class QueryTrace:
     route_confidence: float = 0.0
     route_latency_ms: float = 0.0
 
+    # Adaptive top_k
+    query_complexity: str = ""     # "simple" | "normal" | "complex"
+    effective_top_k: int = 0
+
     # RAG retrieval
     notes_retrieved: int = 0
     notes_after_filter: int = 0
@@ -92,6 +96,8 @@ class QueryTrace:
             "route_method": self.route_method,
             "route_confidence": self.route_confidence,
             "route_latency_ms": self.route_latency_ms,
+            "query_complexity": self.query_complexity,
+            "effective_top_k": self.effective_top_k,
             "query_rewritten": self.query_rewritten,
             "notes_retrieved": self.notes_retrieved,
             "notes_after_filter": self.notes_after_filter,

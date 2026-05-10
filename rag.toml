@@ -110,6 +110,27 @@ log_format = "text"
 max_workers = 4
 
 # =============================================================================
+# PERFORMANCE — auto-tuning e limites de recursos
+# Se auto_tune=true (default), o sistema detecta RAM/CPU/disco e ajusta
+# automaticamente os limites. Os valores aqui servem como base/fallback.
+# RAG_PERFORMANCE_* env vars sobrepõem estes valores
+# =============================================================================
+[performance]
+# true — detecta hardware e ajusta limites automaticamente (sobrepõe valores manuais)
+# false — usa exactamente os valores configurados abaixo
+auto_tune = true
+# Percentagem máxima de CPU antes de reduzir workers durante sync
+max_cpu_percent = 75
+# Percentagem máxima de RAM antes de pausar indexação
+max_memory_percent = 80
+# Cap máximo de workers paralelos (usado como limite do pipeline.max_workers)
+max_parallel_jobs = 4
+# Tamanho do batch para chamadas de embeddings
+embedding_batch_size = 50
+# Timeout máximo por query (segundos)
+query_timeout_seconds = 30
+
+# =============================================================================
 # REPOSITÓRIOS GIT — indexação de código no ChromaDB
 # RAG_REPOS_* env vars sobrepõem estes valores
 # =============================================================================

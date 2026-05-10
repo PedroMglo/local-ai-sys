@@ -24,12 +24,12 @@ def _graphify_output_dir(repo_path: Path) -> Path:
     graphify extract --out DIR escreve em DIR/graphify-out/,
     portanto apontamos --out para {output_dir}/{repo_name}.
     """
-    return settings.graphify.output_dir / repo_path.name / "graphify-out"
+    return Path(settings.graphify.output_dir) / repo_path.name / "graphify-out"
 
 
 def _graphify_out_parent(repo_path: Path) -> Path:
     """O valor a passar a --out (o pai de graphify-out/)."""
-    return settings.graphify.output_dir / repo_path.name
+    return Path(settings.graphify.output_dir) / repo_path.name
 
 
 def _graph_json_path(repo_path: Path) -> Path:
