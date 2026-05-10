@@ -1,23 +1,21 @@
 # Obsidian RAG — Configuração Central
+# Gerado por: rag init
 # Todas as opções podem ser overridden via env vars com prefixo RAG_
 # Ex: RAG_RETRIEVAL_TOP_K=15 sobrepõe [retrieval] top_k
 
 [paths]
 source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
-data_dir = "data/chroma"        # relativo à raiz do projeto
-vault_dir = "~/Obsidian/Vault"  # fonte principal — expandido em runtime
+data_dir = "data/chroma"
+vault_dir = "~/Obsidian/Vault"       # fonte principal dos dados Obsidian
 
-# =============================================================================
-# SYNC — como o Vault Obsidian é lido pelo pipeline
-# Backends disponíveis:
+[sync]
+# Backend de sincronização do Vault:
 #   direct — lê directamente de vault_dir (default, cross-platform, sem cópia)
 #   python — copia vault_dir → source_dir com shutil (cross-platform, incremental)
 #   rsync  — usa rsync para copiar (Linux/macOS, mais rápido para vaults grandes)
 #   auto   — rsync se disponível, senão python
-# =============================================================================
-[sync]
 backend = "direct"
-delete_missing = true
+delete_missing = true           # remover de source_dir ficheiros apagados do vault
 follow_symlinks = false
 
 [ollama]
@@ -36,155 +34,70 @@ top_k = 10
 score_threshold = 0.45
 dynamic_threshold_ratio = 0.75
 embedding_cache_size = 128
-# Modo de contexto: "auto" detecta heuristicamente que fontes usar
-# Modos: auto | rag_only | graph_only | both | none
 context_mode = "auto"
-# Budget máximo de tokens estimados no contexto injectado (~4 chars/token)
 token_budget = 4000
-# Graph context: max vizinhos por nó e max comunidades no contexto
 graph_max_neighbors = 5
 graph_max_communities = 3
-# TTL em segundos para cache do graph.json em memória (fallback de invalidação)
 graph_cache_ttl = 300
 
 [api]
 host = "127.0.0.1"
 port = 8484
 query_top_k = 10
-# API key para autenticação (vazio = sem autenticação)
 api_key = ""
-# Rate limit por minuto (0 = sem limite)
 rate_limit = 60
-# Rate limit para o endpoint /chat (mais restritivo)
 chat_rate_limit = 20
 
-# Per-model RAG toggle: model_name → rag habilitado
 [models]
-"qwen3-pt" = true
-"deepseek-r1-pt" = true
-"coder-pt" = false
-"gemma3-pt" = true
+"deepseek-r1-pt:latest" = true
+"gemma3-pt:latest" = true
+"qwen3-pt:latest" = true
+"gemma3:4b" = true
+"qwen3:8b" = true
+"deepseek-r1:8b" = true
+"coder-pt:latest" = false
+"qwen2.5-coder:7b" = false
 
-# =============================================================================
-# ROUTER — classificação automática de queries
-# Decide se a pergunta precisa de contexto local (RAG/Graph) ou não
-# =============================================================================
 [router]
-# true — usa LLM para classificar queries; false — apenas heurística keyword
 enabled = true
-# Modelo LLM para o router (deve ser rápido; gemma3:4b ~77 tok/s)
 model = "gemma3:4b"
-# Timeout máximo em segundos para a chamada LLM do router
 timeout = 15.0
 
-# =============================================================================
-# RERANKER — reordenação cross-encoder (opcional)
-# Melhora precisão ao custo de latência extra
-# =============================================================================
 [reranker]
-enabled = true
-# Modelo Ollama para scoring de relevância
+enabled = false
 model = "gemma3:4b"
-# Quantos candidatos avaliar (top_k_candidates > top_k final)
 top_k_candidates = 30
-# Score mínimo do reranker (0.0–1.0)
 min_score = 0.3
 
-# =============================================================================
-# CONTEXT POLICY — política de injecção de contexto
-# =============================================================================
 [context_policy]
-# Score mínimo agregado para aceitar o contexto como relevante
-# Se o melhor chunk ficar abaixo disto, o contexto é descartado
 min_relevance_score = 0.50
-# Mínimo de chunks acima do threshold para considerar contexto útil
 min_relevant_chunks = 1
-# Se true, avisa no log quando o contexto é descartado por fraca relevância
 log_weak_context = true
 
-# =============================================================================
-# DEBUG — observabilidade e logging
-# =============================================================================
 [debug]
-# true — mostra decisões do router, scores, fontes, timing no output
 enabled = false
-# true — log completo em ficheiro (obsidian_rag.log)
 log_to_file = false
-# Nível de log: DEBUG | INFO | WARNING
 log_level = "INFO"
-# Formato de log: "text" (human-readable) ou "json" (estruturado)
 log_format = "text"
 
-# =============================================================================
-# PIPELINE — opções de sincronização
-# =============================================================================
 [pipeline]
-# Número máximo de workers para sync paralelo de repos (1 = sequencial)
 max_workers = 4
 
-# =============================================================================
-# PERFORMANCE — auto-tuning e limites de recursos
-# Se auto_tune=true (default), o sistema detecta RAM/CPU/disco e ajusta
-# automaticamente os limites. Os valores aqui servem como base/fallback.
-# RAG_PERFORMANCE_* env vars sobrepõem estes valores
-# =============================================================================
-[performance]
-# true — detecta hardware e ajusta limites automaticamente (sobrepõe valores manuais)
-# false — usa exactamente os valores configurados abaixo
-auto_tune = true
-# Percentagem máxima de CPU antes de reduzir workers durante sync
-max_cpu_percent = 75
-# Percentagem máxima de RAM antes de pausar indexação
-max_memory_percent = 80
-# Cap máximo de workers paralelos (usado como limite do pipeline.max_workers)
-max_parallel_jobs = 4
-# Tamanho do batch para chamadas de embeddings
-embedding_batch_size = 50
-# Timeout máximo para chamadas HTTP de embeddings (segundos)
-embedding_timeout = 120
-# Timeout máximo por query (segundos)
-query_timeout_seconds = 30
-
-# =============================================================================
-# REPOSITÓRIOS GIT — indexação de código no ChromaDB
-# RAG_REPOS_* env vars sobrepõem estes valores
-# =============================================================================
 [repos]
-# Lista de paths absolutos (ou ~) para repos git a indexar
-paths = ["~/ai-local/SPEECH-LAB", "~/Projects/ApacheSpark-CD", "~/ai-local/obsidian-rag"]
-# Coleção ChromaDB separada para código (não mistura com notas Obsidian)
+paths = ["[1", "/home/pmglourenco/Projects/GCP", "/home/pmglourenco/Projects/Git_Concepts", "/home/pmglourenco/Projects/Python_Stud", "/home/pmglourenco/Projects/speech-lab", "/home/pmglourenco/ai-local/SPEECH-LAB", "7]"]
 collection_name = "code_repos"
 
 [repos.chunking]
-# "ast" — chunks por função/classe via ast.parse() (Python)
-# "text" — fallback de texto (para .md/.yaml/.toml/.sh no repo)
 strategy = "ast"
 max_chars = 2000
 overlap_chars = 200
 min_chars = 80
 contextual_prefix = true
 
-# =============================================================================
-# GRAPHIFY — knowledge graph estrutural dos repos
-# Requer: pip install graphifyy
-# RAG_GRAPHIFY_* env vars sobrepõem estes valores
-# =============================================================================
 [graphify]
-enabled = true
-# Backend LLM para extracção de docs/markdown (código é local via AST)
-# "ollama" — local, sem API key; requer OLLAMA_BASE_URL acessível
+enabled = false
 backend = "ollama"
-# Modelo LLM para extracção semântica (vazio = usar default do backend)
-# ollama default: qwen2.5-coder:7b
-# Para repos complexos recomendam-se modelos de raciocínio:
-#   deepseek-r1:8b — melhor extracção semântica de relações
-#   qwen3:8b       — bom balanço velocidade/qualidade
-model = "deepseek-r1:8b"
-# Directório onde ficam os graph.json por repo (relativo à raiz do projecto)
+model = ""
 output_dir = "data/graphify"
-# Vault Obsidian dedicado para visualização dos grafos (notas Markdown)
-# Criado automaticamente em cada rag-sync -g
 graph_vault_dir = "~/Obsidian/knowledge-graphs"
-# true — rebuild incremental em cada sync
-# false — só rebuild quando ausente ou forçado com rag-sync -g --force
 auto_update = false
