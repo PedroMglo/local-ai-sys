@@ -146,6 +146,19 @@ embedding_timeout = 120
 query_timeout_seconds = 30
 # Timeout máximo por subprocess graphify (segundos) — 0 = sem limite
 graph_timeout = 600
+# --- Bounded pipeline (Phase 1) ---
+# Workers de parsing paralelo (ProcessPoolExecutor)
+parser_workers = 3
+# Fechar batch de embedding quando soma de chars excede este valor
+embedding_batch_max_chars = 48000
+# Max chunks pendentes entre parser e embedder (backpressure)
+chunks_queue_max = 128
+# Max ficheiros pendentes entre scanner e parser
+files_queue_max = 256
+# Pausar pipeline quando RAM% excede este valor
+pause_memory_percent = 75
+# Abortar pipeline quando RAM% excede este valor
+abort_memory_percent = 85
 
 # =============================================================================
 # REPOSITÓRIOS GIT — indexação de código no ChromaDB

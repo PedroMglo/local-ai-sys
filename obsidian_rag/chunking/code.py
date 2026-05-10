@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import hashlib
 from pathlib import Path
+from typing import Iterator
 
 from obsidian_rag.chunking.markdown import Chunk, chunk_note
 
@@ -368,18 +369,27 @@ def chunk_repo(repo_dir: Path | str, cfg=None) -> list[Chunk]:
     if not repo_dir.exists():
         raise FileNotFoundError(f"Repo não encontrado: {repo_dir}")
 
-    # Extensões a processar
-    valid_extensions = {_PYTHON_EXTENSION} | _REPO_DOC_EXTENSIONS
-    all_files = sorted(repo_dir.rglob("*"))
-
     all_chunks: list[Chunk] = []
-    for path in all_files:
+    for path in iter_repo_files(repo_dir):
+        all_chunks.extend(chunk_file(path, repo_dir, cfg))
+
+    return all_chunks
+
+
+def iter_repo_files(repo_dir: Path | str) -> Iterator[Path]:
+    """Yield valid file paths from a repo, filtering ignored dirs/files/extensions.
+
+    This is the streaming equivalent of the scan loop in chunk_repo().
+    Used by the bounded ingest pipeline to process files one at a time.
+    """
+    repo_dir = Path(repo_dir).expanduser().resolve()
+    valid_extensions = {_PYTHON_EXTENSION} | _REPO_DOC_EXTENSIONS
+
+    for path in sorted(repo_dir.rglob("*")):
         if not path.is_file():
             continue
         if _should_skip(path, repo_dir):
             continue
         if path.suffix.lower() not in valid_extensions:
             continue
-        all_chunks.extend(chunk_file(path, repo_dir, cfg))
-
-    return all_chunks
+        yield path

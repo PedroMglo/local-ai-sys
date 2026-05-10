@@ -88,15 +88,17 @@ def auto_tune(perf: "PerformanceConfig") -> "PerformanceConfig":
         return perf
 
     # --- max_parallel_jobs ---
-    auto_jobs = max(1, min(res.cpu_cores // 4, 8))
+    # Conservative: at most cpu_cores // 6, capped at 4
+    auto_jobs = max(1, min(res.cpu_cores // 6, 4))
 
     # --- embedding_batch_size ---
+    # Conservative to avoid RAM spikes during Ollama embedding calls
     if res.ram_total_gb < 8:
-        auto_batch = 25
+        auto_batch = 15
     elif res.ram_total_gb < 16:
-        auto_batch = 50
+        auto_batch = 25
     else:
-        auto_batch = 100
+        auto_batch = 50
 
     # --- If RAM available is critically low, reduce everything ---
     if res.ram_available_gb < 4:
@@ -113,6 +115,12 @@ def auto_tune(perf: "PerformanceConfig") -> "PerformanceConfig":
         embedding_timeout=perf.embedding_timeout,
         query_timeout_seconds=perf.query_timeout_seconds,
         graph_timeout=perf.graph_timeout,
+        parser_workers=perf.parser_workers,
+        embedding_batch_max_chars=perf.embedding_batch_max_chars,
+        chunks_queue_max=perf.chunks_queue_max,
+        files_queue_max=perf.files_queue_max,
+        pause_memory_percent=perf.pause_memory_percent,
+        abort_memory_percent=perf.abort_memory_percent,
     )
 
     log.info(
@@ -140,37 +148,44 @@ class ThrottleAdvice:
 def should_throttle(perf: "PerformanceConfig", data_dir: str | None = None) -> ThrottleAdvice:
     """Verifica se o sistema está sob pressão e recomenda acção.
 
-    Chamado antes de cada repo no sync pipeline.
+    Thin wrapper around :class:`ResourceGovernor` for backward compatibility.
+    Creates a governor, takes a single sample, and maps the action to
+    ``ThrottleAdvice``.
     """
-    try:
-        res = detect_resources(data_dir)
-    except Exception:
-        return ThrottleAdvice()
+    from obsidian_rag.pipeline.governor import GovernorAction, ResourceGovernor
 
-    reasons: list[str] = []
-    pause = False
-    reduce = False
-    low_disk = False
+    gov = ResourceGovernor(perf, data_dir=data_dir, interval=1.0)
+    # Take one synchronous sample (start/stop immediately)
+    gov.start()
+    action = gov.check()
+    snap = gov.snapshot()
+    gov.stop()
 
-    if res.ram_percent > perf.max_memory_percent + 10:
-        # Critical: >10% above threshold
-        pause = True
-        reasons.append(f"RAM {res.ram_percent:.0f}% (limite: {perf.max_memory_percent}%)")
-    elif res.ram_percent > perf.max_memory_percent:
-        reduce = True
-        reasons.append(f"RAM {res.ram_percent:.0f}% acima do limite ({perf.max_memory_percent}%)")
+    if action is GovernorAction.ABORT:
+        reasons = []
+        if snap and snap.disk_free_gb < 1.0:
+            reasons.append(f"Disco: apenas {snap.disk_free_gb:.1f} GB livres")
+        if snap and snap.ram_percent >= perf.abort_memory_percent:
+            reasons.append(f"RAM {snap.ram_percent:.0f}% (abort: {perf.abort_memory_percent}%)")
+        return ThrottleAdvice(
+            pause_sync=True,
+            low_disk=bool(snap and snap.disk_free_gb < 1.0),
+            reason="; ".join(reasons) if reasons else "recursos críticos",
+        )
 
-    if res.cpu_percent > perf.max_cpu_percent + 10:
-        reduce = True
-        reasons.append(f"CPU {res.cpu_percent:.0f}% acima do limite ({perf.max_cpu_percent}%)")
+    if action is GovernorAction.PAUSE:
+        reason = f"RAM {snap.ram_percent:.0f}% (pause: {perf.pause_memory_percent}%)" if snap else ""
+        return ThrottleAdvice(pause_sync=True, reason=reason)
 
-    if res.disk_free_gb < 1.0:
-        low_disk = True
-        reasons.append(f"Disco: apenas {res.disk_free_gb:.1f} GB livres")
+    if action is GovernorAction.REDUCE:
+        reasons = []
+        if snap and snap.ram_percent >= perf.max_memory_percent:
+            reasons.append(f"RAM {snap.ram_percent:.0f}% acima do limite ({perf.max_memory_percent}%)")
+        if snap and snap.cpu_percent > perf.max_cpu_percent + 10:
+            reasons.append(f"CPU {snap.cpu_percent:.0f}% acima do limite ({perf.max_cpu_percent}%)")
+        return ThrottleAdvice(
+            reduce_workers=True,
+            reason="; ".join(reasons) if reasons else "",
+        )
 
-    return ThrottleAdvice(
-        pause_sync=pause,
-        reduce_workers=reduce,
-        low_disk=low_disk,
-        reason="; ".join(reasons) if reasons else "",
-    )
+    return ThrottleAdvice()

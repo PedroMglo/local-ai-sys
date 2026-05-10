@@ -10,6 +10,7 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Iterator
 
 from obsidian_rag.config import settings
 
@@ -191,3 +192,29 @@ def chunk_all_notes(source_dir: Path | None = None) -> list[Chunk]:
         all_chunks.extend(chunk_note(path, source_dir))
 
     return all_chunks
+
+
+def iter_note_files(source_dir: Path | None = None) -> Iterator[Path]:
+    """Yield .md file paths from the notes directory, filtering excluded dirs.
+
+    This is the streaming equivalent of the scan loop in chunk_all_notes().
+    Used by the bounded ingest pipeline to process files one at a time.
+    """
+    if source_dir is None:
+        if settings.sync.backend == "direct":
+            source_dir = settings.paths.vault_dir
+        else:
+            source_dir = settings.paths.source_dir
+
+    if not source_dir.exists():
+        return
+
+    exclude_dirs = set(_EXCLUDED_DIRS)
+    try:
+        exclude_dirs.update(settings.sync.exclude_patterns)
+    except Exception:
+        pass
+
+    for path in sorted(source_dir.rglob("*.md")):
+        if not any(part in exclude_dirs for part in path.relative_to(source_dir).parts):
+            yield path

@@ -14,13 +14,16 @@ CLI:
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import gc
+import os
 from pathlib import Path
 
 from obsidian_rag.chunking.code import chunk_repo
 from obsidian_rag.chunking.markdown import chunk_all_notes
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import clear_embed_cache
+from obsidian_rag.pipeline.ingest import IngestPipeline, IngestSource
+from obsidian_rag.pipeline.manifest import IngestManifest
 from obsidian_rag.pipeline.vault_sync import sync_vault
 from obsidian_rag.store.chroma import get_client, get_collection, sync_repo_to_chroma, sync_to_chroma
 
@@ -35,24 +38,28 @@ def sync_notes() -> None:
     2. Chunk all .md files
     3. Embed and store in ChromaDB
     """
-    from obsidian_rag.tuning import should_throttle
+    from obsidian_rag.pipeline.governor import GovernorAction, ResourceGovernor
 
-    # --- Resource protection ---
-    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
-    if advice.low_disk:
-        print(f"✗ [Notas] Disco quase cheio — sync abortado. {advice.reason}")
-        return
-    if advice.pause_sync:
-        import time as _time
-        print(f"⚠ [Notas] Sistema sob pressão: {advice.reason}")
-        for attempt in range(1, 4):
-            print(f"    Pausa {attempt}/3 — a aguardar 5s...")
-            _time.sleep(5)
-            advice = should_throttle(settings.performance, str(settings.paths.data_dir))
-            if not advice.pause_sync:
-                break
-        else:
-            print("    Pressão mantém-se — a continuar com precaução.")
+    # --- Resource protection via governor ---
+    gov = ResourceGovernor(settings.performance, data_dir=str(settings.paths.data_dir))
+    gov.start()
+    try:
+        action = gov.check()
+        if action is GovernorAction.ABORT:
+            snap = gov.snapshot()
+            reason = f"RAM {snap.ram_percent:.0f}%" if snap else "recursos críticos"
+            print(f"✗ [Notas] {reason} — sync abortado.")
+            return
+        if action is GovernorAction.PAUSE:
+            print("⚠ [Notas] Sistema sob pressão — a aguardar recursos...")
+            action = gov.wait_until_safe(timeout=15)
+            if action is GovernorAction.ABORT:
+                print("✗ [Notas] Recursos críticos após espera — sync abortado.")
+                return
+            if action is GovernorAction.PAUSE:
+                print("    Pressão mantém-se — a continuar com precaução.")
+    finally:
+        gov.stop()
 
     clear_embed_cache()
 
@@ -76,16 +83,15 @@ def sync_notes() -> None:
     print(f"==> [Notas] ChromaDB: {collection.count()} chunks na coleção 'obsidian_vault'")
 
 
-def _chunk_single_repo(repo_path: Path) -> tuple[str, list]:
-    """Chunk a single repo — runs in worker thread."""
-    repo_chunks = chunk_repo(repo_path, cfg=settings.repos.chunking)
-    return repo_path.name, repo_chunks
-
-
 def sync_repos() -> None:
     """Sincroniza repos git → ChromaDB (coleção code_repos).
 
-    Chunking de repos é feito em paralelo com ThreadPoolExecutor.
+    Uses the bounded ingest pipeline: files are parsed in parallel via
+    ProcessPoolExecutor, embedded in micro-batches by a single embedder,
+    and written to ChromaDB by a single writer. Bounded queues between
+    every stage prevent unbounded memory growth.
+
+    Falls back to sequential processing if the pipeline fails to initialize.
     """
     if not settings.repos.paths:
         print("==> [Repos] Sem repos configurados em rag.toml [repos] paths. Skipping.")
@@ -103,124 +109,96 @@ def sync_repos() -> None:
         print("==> [Repos] Nenhum repo válido encontrado.")
         return
 
-    # --- Resource protection ---
-    import time as _time
+    # --- Resource protection via governor ---
+    from obsidian_rag.pipeline.governor import GovernorAction, ResourceGovernor
 
-    from obsidian_rag.tuning import should_throttle
+    gov = ResourceGovernor(settings.performance, data_dir=str(settings.paths.data_dir))
+    gov.start()
 
-    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
-    if advice.low_disk:
-        print(f"✗ [Repos] Disco quase cheio — sync abortado. {advice.reason}")
+    action = gov.check()
+    if action is GovernorAction.ABORT:
+        snap = gov.snapshot()
+        reason = f"RAM {snap.ram_percent:.0f}%" if snap else "recursos críticos"
+        print(f"✗ [Repos] {reason} — sync abortado.")
+        gov.stop()
         return
+    if action is GovernorAction.PAUSE:
+        print("⚠ [Repos] Sistema sob pressão — a aguardar recursos...")
+        action = gov.wait_until_safe(timeout=15)
+        if action is GovernorAction.ABORT:
+            print("✗ [Repos] Recursos críticos após espera — sync abortado.")
+            gov.stop()
+            return
+        if action is GovernorAction.PAUSE:
+            print("    Pressão mantém-se — a continuar com precaução.")
 
-    max_workers = min(settings.pipeline.max_workers, len(valid_paths))
+    # --- Bounded ingest pipeline ---
+    print(f"==> [Repos] A processar {len(valid_paths)} repos via bounded pipeline...")
 
-    if advice.pause_sync:
-        print(f"⚠ [Repos] Sistema sob pressão: {advice.reason}")
-        for attempt in range(1, 4):
-            print(f"    Pausa {attempt}/3 — a aguardar 5s...")
-            _time.sleep(5)
-            advice = should_throttle(settings.performance, str(settings.paths.data_dir))
-            if not advice.pause_sync:
-                break
-        else:
-            max_workers = max(1, max_workers // 2)
-            print(f"    Pressão mantém-se — a reduzir workers para {max_workers}")
-
-    if advice.reduce_workers:
-        max_workers = max(1, max_workers // 2)
-        print(f"⚠ [Repos] Workers reduzidos para {max_workers}: {advice.reason}")
-    all_repo_chunks = []
-
-    if max_workers <= 1:
-        # Sequential fallback
-        for repo_path in valid_paths:
-            # Throttle check before each repo
-            advice = should_throttle(settings.performance, str(settings.paths.data_dir))
-            if advice.low_disk:
-                print(f"✗ [Repos] Disco quase cheio — sync abortado. {advice.reason}")
-                break
-            if advice.pause_sync:
-                print(f"⚠ [Repos] Pressão antes de {repo_path.name}: {advice.reason} — a aguardar...")
-                for attempt in range(1, 4):
-                    _time.sleep(5)
-                    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
-                    if not advice.pause_sync:
-                        break
-            print(f"==> [Repos] A processar repo: {repo_path.name} ({repo_path})")
-            repo_chunks = chunk_repo(repo_path, cfg=settings.repos.chunking)
-            print(f"    Chunks extraídos: {len(repo_chunks)}")
-            all_repo_chunks.extend(repo_chunks)
-    else:
-        print(f"==> [Repos] A processar {len(valid_paths)} repos em paralelo (max_workers={max_workers})...")
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit repos one at a time with throttle checks between submissions
-            pending: dict = {}
-            remaining = list(valid_paths)
-
-            while remaining or pending:
-                # Submit next repo if under worker limit and resources allow
-                while remaining and len(pending) < max_workers:
-                    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
-                    if advice.low_disk:
-                        print(f"\n✗ [Repos] Disco quase cheio — não submete mais repos. {advice.reason}")
-                        remaining.clear()
-                        break
-                    if advice.pause_sync and pending:
-                        # Already have work in progress — wait for some to finish first
-                        print(f"\n⚠ [Repos] Pressão detectada — a aguardar repos em curso ({len(pending)})...")
-                        break
-                    repo_path = remaining.pop(0)
-                    future = executor.submit(_chunk_single_repo, repo_path)
-                    pending[future] = repo_path
-
-                if not pending:
-                    break
-
-                # Wait for at least one to complete
-                done_iter = as_completed(pending)
-                done_future = next(done_iter)
-                repo_path = pending.pop(done_future)
-                try:
-                    name, repo_chunks = done_future.result()
-                    print(f"    [{name}] Chunks extraídos: {len(repo_chunks)}")
-                    all_repo_chunks.extend(repo_chunks)
-                except Exception as e:
-                    print(f"    [ERRO] {repo_path.name}: {e}")
-
-    if not all_repo_chunks:
-        print("==> [Repos] Nenhum chunk extraído dos repos.")
-        return
-
-    print(f"==> [Repos] Total de chunks: {len(all_repo_chunks)}")
-    print(f"==> [Repos] A sincronizar com ChromaDB ({settings.repos.collection_name})...")
-    sync_repo_to_chroma(all_repo_chunks)
+    manifest_path = settings.paths.data_dir / "manifest.db"
+    manifest = IngestManifest(manifest_path)
 
     client = get_client()
     collection = get_collection(client, name=settings.repos.collection_name)
-    print(f"==> [Repos] ChromaDB: {collection.count()} chunks na coleção '{settings.repos.collection_name}'")
+
+    sources = [
+        IngestSource(source_type="code", path=p, name=p.name)
+        for p in valid_paths
+    ]
+
+    pipeline = IngestPipeline(
+        manifest=manifest,
+        perf=settings.performance,
+        collection=collection,
+        governor=gov,    # pass the already-running governor
+    )
+
+    try:
+        result = pipeline.run(sources)
+    finally:
+        manifest.close()
+        gov.stop()
+
+    # --- Report ---
+    print(f"\n==> [Repos] Pipeline concluído em {result.elapsed_seconds:.1f}s")
+    print(f"    Ficheiros: {result.files_scanned} scanned, {result.files_parsed} parsed, {result.files_skipped} skipped")
+    print(f"    Chunks: {result.chunks_produced} produced, {result.chunks_embedded} embedded, {result.chunks_stored} stored")
+    if result.stale_deleted:
+        print(f"    Removidos: {result.stale_deleted} chunks obsoletos")
+    if result.errors:
+        print(f"    Erros: {len(result.errors)}")
+        for err in result.errors[:5]:
+            print(f"      - {err}")
+        if len(result.errors) > 5:
+            print(f"      ... e mais {len(result.errors) - 5}")
+
+    final_count = collection.count()
+    print(f"==> [Repos] ChromaDB: {final_count} chunks na coleção '{settings.repos.collection_name}'")
 
 
 def _wait_for_resources(label: str) -> bool:
-    """Aguarda recursos disponíveis entre fases. Retorna False se disco cheio."""
-    import time as _time
+    """Aguarda recursos disponíveis entre fases. Retorna False se recursos críticos."""
+    from obsidian_rag.pipeline.governor import GovernorAction, ResourceGovernor
 
-    from obsidian_rag.tuning import should_throttle
-
-    advice = should_throttle(settings.performance, str(settings.paths.data_dir))
-    if advice.low_disk:
-        print(f"✗ [{label}] Disco quase cheio — fase seguinte abortada. {advice.reason}")
-        return False
-    if advice.pause_sync:
-        print(f"⚠ [{label}] Sistema sob pressão após fase anterior: {advice.reason}")
-        for attempt in range(1, 4):
-            print(f"    Pausa {attempt}/3 — a aguardar 5s...")
-            _time.sleep(5)
-            advice = should_throttle(settings.performance, str(settings.paths.data_dir))
-            if not advice.pause_sync:
-                break
-        else:
-            print(f"    [{label}] Pressão mantém-se — a continuar com precaução.")
+    gov = ResourceGovernor(settings.performance, data_dir=str(settings.paths.data_dir))
+    gov.start()
+    try:
+        action = gov.check()
+        if action is GovernorAction.ABORT:
+            snap = gov.snapshot()
+            reason = f"RAM {snap.ram_percent:.0f}%" if snap else "recursos críticos"
+            print(f"✗ [{label}] {reason} — fase seguinte abortada.")
+            return False
+        if action is GovernorAction.PAUSE:
+            print(f"⚠ [{label}] Sistema sob pressão após fase anterior — a aguardar...")
+            action = gov.wait_until_safe(timeout=15)
+            if action is GovernorAction.ABORT:
+                print(f"✗ [{label}] Recursos críticos — fase seguinte abortada.")
+                return False
+            if action is GovernorAction.PAUSE:
+                print(f"    [{label}] Pressão mantém-se — a continuar com precaução.")
+    finally:
+        gov.stop()
     return True
 
 
@@ -276,6 +254,19 @@ def sync_graphify(*, force: bool = False) -> None:
 
 def main() -> None:
     """Entry point: rag-sync [-l | -g | --all]"""
+    # Lower process priority so sync doesn't starve the desktop/OS
+    try:
+        os.nice(10)
+    except OSError:
+        pass  # non-root may not be able to increase niceness further
+    try:
+        _main_inner()
+    except KeyboardInterrupt:
+        print("\n\n⚠ Interrompido pelo utilizador (Ctrl+C). Sync parcial pode ter sido gravado.")
+        raise SystemExit(130)
+
+
+def _main_inner() -> None:
     parser = argparse.ArgumentParser(
         prog="rag-sync",
         description="Sincronização de embeddings e grafos para o RAG local.",

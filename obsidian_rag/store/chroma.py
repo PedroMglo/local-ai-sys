@@ -1,5 +1,6 @@
 """ChromaDB vector store — client, collection, and sync operations."""
 
+import logging
 import time
 
 import chromadb
@@ -8,6 +9,8 @@ from chromadb.config import Settings as ChromaSettings
 from obsidian_rag.chunking.markdown import Chunk
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import embed_texts
+
+log = logging.getLogger(__name__)
 
 
 def get_client() -> chromadb.ClientAPI:
@@ -83,15 +86,18 @@ def sync_to_chroma(chunks: list[Chunk], verbose: bool = True, _collection=None) 
     batch_size = settings.performance.embedding_batch_size
     data_dir = str(settings.paths.data_dir)
 
-    for i in range(0, total, batch_size):
+    i = 0
+    while i < total:
         # --- Resource protection between batches ---
         if i > 0:
             advice = should_throttle(settings.performance, data_dir)
             if advice.low_disk:
+                log.warning("Disco quase cheio — sync abortado após %d/%d chunks. %s", processed, total, advice.reason)
                 print(f"\n  ✗ Disco quase cheio — sync abortado após {processed}/{total} chunks. {advice.reason}")
                 return
             if advice.pause_sync:
                 for attempt in range(1, 4):
+                    log.info("Pressão de recursos (chunk %d/%d): %s — pausa %d/3", i, total, advice.reason, attempt)
                     print(f"\n  ⚠ Sistema sob pressão: {advice.reason} — pausa {attempt}/3...")
                     time.sleep(5)
                     advice = should_throttle(settings.performance, data_dir)
@@ -99,9 +105,11 @@ def sync_to_chroma(chunks: list[Chunk], verbose: bool = True, _collection=None) 
                         break
                 else:
                     batch_size = max(5, batch_size // 2)
+                    log.info("Pressão mantém-se — batch reduzido para %d", batch_size)
                     print(f"  Pressão mantém-se — batch reduzido para {batch_size}")
             elif advice.reduce_workers:
                 batch_size = max(5, batch_size // 2)
+                log.info("Batch reduzido para %d: %s", batch_size, advice.reason)
                 if verbose:
                     print(f"\n  ⚠ Batch reduzido para {batch_size}: {advice.reason}")
 
@@ -120,6 +128,7 @@ def sync_to_chroma(chunks: list[Chunk], verbose: bool = True, _collection=None) 
         )
 
         processed += len(batch)
+        i += len(batch)
         if verbose:
             elapsed = time.time() - start_time
             rate = processed / elapsed if elapsed > 0 else 0
@@ -139,3 +148,33 @@ def sync_repo_to_chroma(chunks: list[Chunk], verbose: bool = True) -> None:
     client = get_client()
     collection = get_collection(client, name=settings.repos.collection_name)
     sync_to_chroma(chunks, verbose=verbose, _collection=collection)
+
+
+def upsert_embedded_batch(
+    collection,
+    chunks: list[Chunk],
+    embeddings: list[list[float]],
+) -> None:
+    """Upsert a batch of chunks with pre-computed embeddings.
+
+    Unlike sync_to_chroma(), this does NOT call embed_texts() — embeddings
+    are provided by the caller (e.g. the ingest pipeline's embedder stage).
+    """
+    if not chunks:
+        return
+    collection.add(
+        ids=[c.id for c in chunks],
+        embeddings=embeddings,
+        documents=[c.text for c in chunks],
+        metadatas=[c.metadata for c in chunks],
+    )
+
+
+def delete_stale_from_collection(collection, stale_ids: set[str] | list[str]) -> int:
+    """Delete stale chunk IDs from a collection in batches. Returns count deleted."""
+    stale_list = list(stale_ids)
+    if not stale_list:
+        return 0
+    for i in range(0, len(stale_list), 500):
+        collection.delete(ids=stale_list[i : i + 500])
+    return len(stale_list)
