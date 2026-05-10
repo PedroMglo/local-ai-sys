@@ -35,16 +35,16 @@
 
 **Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama, ChromaDB). Faltam integration tests e CI/CD.
 
-### 1.2 Singletons mutáveis para coleções ChromaDB
+### 1.2 ~~Singletons mutáveis para coleções ChromaDB~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                                                                    |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Prioridade**         | Média                                                                                                      |
+| **Prioridade**         | ~~Média~~ — Resolvido                                                                                      |
 | **Impacto**            | Médio — dificulta testes e pode causar state leaks                                                         |
 | **Complexidade**       | Baixa                                                                                                      |
 | **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py` (`_chroma_collection`, `_code_collection`), `obsidian_rag/store/chroma.py` |
 
-As coleções ChromaDB são geridas como variáveis globais mutáveis (`_chroma_collection`, `_code_collection`) em `rag.py`. Este padrão impede injeção de dependências e dificulta mocking em testes.
+**Resolução (2026-05-10):** `_get_collection()` e `_get_code_collection()` aceitam agora parâmetro `_override` para injeção de dependências em testes. `_get_code_collection` partilha o `_chroma_client` global em vez de criar instância separada. Adicionada `_reset_collections()` para cleanup em testes. 16 integration tests validam o padrão com ChromaDB in-memory.
 
 ### 1.3 Acoplamento entre retrieval e ChromaDB
 
@@ -120,16 +120,16 @@ O `builder.py` injeta `OLLAMA_API_KEY=ollama` no ambiente do subprocess. Este va
 
 ## 3. Dívida técnica
 
-### 3.1 Sem type checking configurado
+### 3.1 ~~Sem type checking configurado~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                |
 | ---------------------- | ------------------------------------------------------ |
-| **Prioridade**         | Média                                                  |
+| **Prioridade**         | ~~Média~~ — Resolvido                                  |
 | **Impacto**            | Médio — bugs de tipos não são detectados estaticamente |
 | **Complexidade**       | Baixa                                                  |
 | **Ficheiros afetados** | `pyproject.toml`, todos os módulos                     |
 
-Não há configuração de `mypy`, `pyright` ou outro type checker. O `pyproject.toml` não define `[tool.mypy]`.
+**Resolução (2026-05-10):** Configurados `mypy>=1.10` e `ruff>=0.4` como dependências de desenvolvimento. `[tool.mypy]` (python_version=3.11, ignore_missing_imports=true) e `[tool.ruff]` (line-length=120, select E/F/W/I) adicionados ao `pyproject.toml`.
 
 ### 3.2 Sem linter/formatter configurado
 
@@ -142,16 +142,16 @@ Não há configuração de `mypy`, `pyright` ou outro type checker. O `pyproject
 
 Não há configuração de `ruff`, `black`, `flake8` ou `isort`. O código existente é geralmente consistente, mas não há enforcing automático.
 
-### 3.3 Sem CI/CD pipeline
+### 3.3 ~~Sem CI/CD pipeline~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                         |
 | ---------------------- | ----------------------------------------------- |
-| **Prioridade**         | Média                                           |
+| **Prioridade**         | ~~Média~~ — Resolvido                           |
 | **Impacto**            | Médio — sem validação automática em commits/PRs |
 | **Complexidade**       | Média                                           |
-| **Ficheiros afetados** | `.github/workflows/` (inexistente)              |
+| **Ficheiros afetados** | `.github/workflows/ci.yml`                      |
 
-Não existe GitHub Actions, GitLab CI, ou qualquer pipeline de CI/CD. Testes, linting e type checking não são executados automaticamente.
+**Resolução (2026-05-10):** Criado `.github/workflows/ci.yml` com dois jobs: `lint` (ruff check + mypy) e `test` (pytest + coverage --fail-under=50). Triggers: push/PR na branch main.
 
 ### 3.4 Versão hardcoded em múltiplos locais
 
