@@ -1,6 +1,6 @@
 # Obsidian RAG — Pipeline Local v0.4.1
 
-> **Pipeline de RAG 100% local e privado.**  
+> **Pipeline de RAG 100% local e privado.**
 > Indexa o teu Vault Obsidian e repositórios Git numa base de dados vetorial, expõe uma API REST local e funciona como proxy inteligente para o Ollama — injetando contexto relevante nas respostas do LLM apenas quando necessário. **Nenhum dado sai da tua máquina.**
 
 ---
@@ -25,7 +25,7 @@ rag init
 rag up
 ```
 
-**Pré-requisitos:** Python 3.11+, Git, [Ollama](https://ollama.com) com `ollama pull bge-m3`.  
+**Pré-requisitos:** Python 3.11+, Git, [Ollama](https://ollama.com) com `ollama pull bge-m3`.
 **Plataformas:** Linux, macOS, Windows (nativo ou WSL2).
 
 ---

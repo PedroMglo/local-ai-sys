@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   docker-build:
     name: Docker build & sanity check
@@ -17,6 +20,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -85,3 +90,16 @@ jobs:
 
           # Cleanup
           docker stop "$CID" && docker rm "$CID"
+
+      - name: Install Trivy CLI
+        env:
+          TRIVY_VERSION: "0.70.0"
+        run: .github/scripts/install-trivy.sh
+
+      - name: Trivy image scan
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            obsidian-rag:ci
