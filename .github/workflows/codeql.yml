@@ -17,6 +17,7 @@ jobs:
     name: CodeQL (Python)
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       security-events: write
       contents: read
 
