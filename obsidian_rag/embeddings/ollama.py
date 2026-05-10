@@ -12,7 +12,7 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     response = httpx.post(
         f"{settings.ollama.base_url}/api/embed",
         json={"model": settings.ollama.embedding_model, "input": texts},
-        timeout=120.0,
+        timeout=float(settings.performance.embedding_timeout),
     )
     response.raise_for_status()
     result: list[list[float]] = response.json()["embeddings"]
@@ -29,3 +29,8 @@ def _cached_embed(text: str) -> tuple[float, ...]:
 def get_query_embedding(text: str) -> list[float]:
     """Get embedding for a single query text (cached)."""
     return list(_cached_embed(text))
+
+
+def clear_embed_cache() -> None:
+    """Invalidate the embedding LRU cache."""
+    _cached_embed.cache_clear()

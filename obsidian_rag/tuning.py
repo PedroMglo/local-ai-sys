@@ -110,6 +110,7 @@ def auto_tune(perf: "PerformanceConfig") -> "PerformanceConfig":
         max_memory_percent=perf.max_memory_percent,
         max_parallel_jobs=auto_jobs,
         embedding_batch_size=auto_batch,
+        embedding_timeout=perf.embedding_timeout,
         query_timeout_seconds=perf.query_timeout_seconds,
     )
 

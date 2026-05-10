@@ -103,7 +103,7 @@ class TestAutoTune:
 
         perf = PerformanceConfig(
             auto_tune=True, max_cpu_percent=75, max_memory_percent=80,
-            max_parallel_jobs=4, embedding_batch_size=50, query_timeout_seconds=30,
+            max_parallel_jobs=4, embedding_batch_size=50, embedding_timeout=120, query_timeout_seconds=30,
         )
 
         with patch("obsidian_rag.tuning.detect_resources") as mock:
@@ -123,7 +123,7 @@ class TestAutoTune:
 
         perf = PerformanceConfig(
             auto_tune=True, max_cpu_percent=75, max_memory_percent=80,
-            max_parallel_jobs=4, embedding_batch_size=50, query_timeout_seconds=30,
+            max_parallel_jobs=4, embedding_batch_size=50, embedding_timeout=120, query_timeout_seconds=30,
         )
 
         with patch("obsidian_rag.tuning.detect_resources") as mock:
@@ -143,7 +143,7 @@ class TestAutoTune:
 
         perf = PerformanceConfig(
             auto_tune=True, max_cpu_percent=75, max_memory_percent=80,
-            max_parallel_jobs=4, embedding_batch_size=50, query_timeout_seconds=30,
+            max_parallel_jobs=4, embedding_batch_size=50, embedding_timeout=120, query_timeout_seconds=30,
         )
 
         with patch("obsidian_rag.tuning.detect_resources", side_effect=RuntimeError("fail")):
@@ -167,7 +167,7 @@ class TestShouldThrottle:
 
         perf = PerformanceConfig(
             auto_tune=True, max_cpu_percent=75, max_memory_percent=80,
-            max_parallel_jobs=4, embedding_batch_size=50, query_timeout_seconds=30,
+            max_parallel_jobs=4, embedding_batch_size=50, embedding_timeout=120, query_timeout_seconds=30,
         )
 
         with patch("obsidian_rag.tuning.detect_resources") as mock:
@@ -189,7 +189,7 @@ class TestShouldThrottle:
 
         perf = PerformanceConfig(
             auto_tune=True, max_cpu_percent=75, max_memory_percent=80,
-            max_parallel_jobs=4, embedding_batch_size=50, query_timeout_seconds=30,
+            max_parallel_jobs=4, embedding_batch_size=50, embedding_timeout=120, query_timeout_seconds=30,
         )
 
         with patch("obsidian_rag.tuning.detect_resources") as mock:
@@ -209,7 +209,7 @@ class TestShouldThrottle:
 
         perf = PerformanceConfig(
             auto_tune=True, max_cpu_percent=75, max_memory_percent=80,
-            max_parallel_jobs=4, embedding_batch_size=50, query_timeout_seconds=30,
+            max_parallel_jobs=4, embedding_batch_size=50, embedding_timeout=120, query_timeout_seconds=30,
         )
 
         with patch("obsidian_rag.tuning.detect_resources") as mock:
@@ -229,7 +229,7 @@ class TestShouldThrottle:
 
         perf = PerformanceConfig(
             auto_tune=True, max_cpu_percent=75, max_memory_percent=80,
-            max_parallel_jobs=4, embedding_batch_size=50, query_timeout_seconds=30,
+            max_parallel_jobs=4, embedding_batch_size=50, embedding_timeout=120, query_timeout_seconds=30,
         )
 
         with patch("obsidian_rag.tuning.detect_resources") as mock:

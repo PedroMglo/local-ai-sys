@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from functools import lru_cache
 
 import httpx
 
@@ -70,6 +71,7 @@ def rerank_chunks(
     return scored
 
 
+@lru_cache(maxsize=256)
 def _score_chunk(query: str, chunk_text: str, model: str) -> float | None:
     """Score a single chunk's relevance (0.0–1.0)."""
     prompt = _RERANK_PROMPT.format(query=query, chunk=chunk_text)

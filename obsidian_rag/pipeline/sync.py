@@ -20,6 +20,7 @@ from pathlib import Path
 from obsidian_rag.chunking.code import chunk_repo
 from obsidian_rag.chunking.markdown import chunk_all_notes
 from obsidian_rag.config import settings
+from obsidian_rag.embeddings.ollama import clear_embed_cache
 from obsidian_rag.store.chroma import get_client, get_collection, sync_repo_to_chroma, sync_to_chroma
 
 # ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ from obsidian_rag.store.chroma import get_client, get_collection, sync_repo_to_c
 
 def sync_notes() -> None:
     """Sincroniza notas Obsidian → ChromaDB (coleção obsidian_vault)."""
+    clear_embed_cache()
     print("==> [Notas] A fazer chunking das notas Obsidian...")
     chunks = chunk_all_notes()
     print(f"    Total de chunks: {len(chunks)}")

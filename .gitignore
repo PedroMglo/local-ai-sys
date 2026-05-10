@@ -39,6 +39,9 @@ data/
 # Graphify output (generated at runtime)
 graphify-out/
 
+# Source vault copy (rsync — personal data, never commit)
+source/
+
 # --- Secrets / Credentials ---
 .env
 .env.*

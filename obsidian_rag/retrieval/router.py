@@ -163,7 +163,7 @@ def _llm_route(query: str, model: str, base_url: str) -> RoutingDecision | None:
                 "stream": False,
                 "options": {"temperature": 0.0, "num_predict": 64},
             },
-            timeout=15.0,
+            timeout=float(settings.performance.query_timeout_seconds),
         )
         resp.raise_for_status()
         data = resp.json()
