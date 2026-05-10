@@ -8,11 +8,11 @@ from pathlib import Path
 
 
 def run_backup(args: Namespace) -> None:
-    from obsidian_rag.pipeline.backup import backup_chroma
+    from obsidian_rag.pipeline.backup import backup_store
 
     try:
         dest = Path(args.dest) if args.dest else None
-        backup_path = backup_chroma(dest)
+        backup_path = backup_store(dest)
         print(f"Backup criado: {backup_path}")
     except FileNotFoundError as e:
         print(f"Erro: {e}", file=sys.stderr)

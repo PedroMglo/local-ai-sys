@@ -237,24 +237,22 @@ def run_doctor() -> None:
 
     print()
 
-    # 7. ChromaDB
-    print("─── ChromaDB ───")
+    # 7. Vector Store
+    print(f"─── Vector Store ({settings.store.backend}) ───")
     try:
-        from obsidian_rag.store.chroma import get_client, get_collection
-        client = get_client()
-        notes_col = get_collection(client, name="obsidian_vault")
-        notes_count = notes_col.count()
+        from obsidian_rag.store.base import create_store
+        store = create_store()
+        notes_count = store.count(collection="obsidian_vault")
         _ok(f"Notas: {notes_count} chunks (obsidian_vault)")
 
         if settings.repos.paths:
             try:
-                code_col = get_collection(client, name=settings.repos.collection_name)
-                code_count = code_col.count()
+                code_count = store.count(collection=settings.repos.collection_name)
                 _ok(f"Código: {code_count} chunks ({settings.repos.collection_name})")
             except Exception:
                 _warn("Coleção de código não existe (corre: rag sync -l)")
     except Exception as e:
-        _warn(f"ChromaDB: {e}")
+        _warn(f"Store: {e}")
 
     print()
 

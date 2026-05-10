@@ -14,7 +14,7 @@ from obsidian_rag.config import PROJECT_ROOT, config_exists
 _SYSTEM = platform.system()  # "Linux" | "Darwin" | "Windows"
 
 # Paths that must never be indexed — common across all OS
-_DANGEROUS_PATHS_UNIX = frozenset({
+_DANGEROUS_PATHS_UNIX = frozenset({  # nosec B108
     "/", "/bin", "/boot", "/dev", "/etc", "/lib", "/proc", "/root",
     "/sbin", "/sys", "/tmp", "/usr", "/var",
 })
@@ -450,7 +450,7 @@ def run_init(args: Namespace) -> None:
     api_key = ""
     if not auto:
         if _ask_yn("Expor API em 0.0.0.0 (acesso remoto)?", default=False):
-            host = "0.0.0.0"
+            host = "0.0.0.0"  # nosec B104
             api_key = secrets.token_urlsafe(32)
             print(f"  ⚠ API key gerada: {api_key}")
             print("  Guarda esta chave! Necessária para aceder à API.")

@@ -113,25 +113,23 @@ def run_up() -> None:
         else:
             print(f"✓ Modelo do router: {router_model}")
 
-    # 4. ChromaDB status
+    # 4. Vector store status
     try:
-        from obsidian_rag.store.chroma import get_client, get_collection
-        client = get_client()
-        notes_col = get_collection(client, name="obsidian_vault")
-        notes_count = notes_col.count()
+        from obsidian_rag.store.base import create_store
+        store = create_store()
+        notes_count = store.count(collection="obsidian_vault")
         code_count = 0
         if settings.repos.paths:
             try:
-                code_col = get_collection(client, name=settings.repos.collection_name)
-                code_count = code_col.count()
+                code_count = store.count(collection=settings.repos.collection_name)
             except Exception:
                 pass
         if notes_count == 0 and code_count == 0:
-            print("⚠ ChromaDB vazio — corre: rag sync --all")
+            print(f"⚠ Store ({settings.store.backend}) vazio — corre: rag sync --all")
         else:
-            print(f"✓ ChromaDB: {notes_count} chunks notas, {code_count} chunks código")
+            print(f"✓ Store ({settings.store.backend}): {notes_count} chunks notas, {code_count} chunks código")
     except Exception as e:
-        print(f"⚠ ChromaDB: {e}")
+        print(f"⚠ Store: {e}")
 
     print()
 

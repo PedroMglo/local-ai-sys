@@ -30,7 +30,7 @@ from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import get_query_embedding
 from obsidian_rag.prompts.templates import SYSTEM_GENERAL
 from obsidian_rag.retrieval.observe import QueryTrace, setup_logging
-from obsidian_rag.retrieval.rag import _get_code_collection, _get_collection, build_rag_context, should_use_rag
+from obsidian_rag.retrieval.rag import _get_store, build_rag_context, should_use_rag
 
 # === Globals ===
 _http_pool: _httpx.AsyncClient | None = None
@@ -73,12 +73,7 @@ async def lifespan(app: FastAPI):
     """Preload ChromaDB collections + create connection pool."""
     global _http_pool
     setup_logging()
-    _get_collection()
-    if settings.repos.paths:
-        try:
-            _get_code_collection()
-        except Exception:
-            pass
+    _get_store()   # warm up the VectorStore singleton
     _http_pool = _httpx.AsyncClient(
         base_url=settings.ollama.base_url,
         timeout=_httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=10.0),
@@ -139,18 +134,17 @@ def health():
 
 @app.get("/stats", response_model=StatsResponse)
 def stats():
-    notes_collection = _get_collection()
+    store = _get_store()
     code_chunks = 0
     code_name = ""
     if settings.repos.paths:
         try:
-            code_col = _get_code_collection()
-            code_chunks = code_col.count()
+            code_chunks = store.count(collection=settings.repos.collection_name)
             code_name = settings.repos.collection_name
         except Exception:
             pass
     return StatsResponse(
-        total_chunks=notes_collection.count(),
+        total_chunks=store.count(collection="obsidian_vault"),
         collection_name="obsidian_vault",
         chroma_path=str(settings.paths.data_dir),
         code_chunks=code_chunks,
@@ -158,35 +152,56 @@ def stats():
     )
 
 
-def _query_collection(collection, req: QueryRequest) -> list[ChunkResult]:
-    """Executa query vectorial numa coleção e devolve ChunkResults."""
+def _query_store(store, collection_name: str, req: QueryRequest) -> list[ChunkResult]:
+    """Executa query vectorial via VectorStore e devolve ChunkResults."""
+    from obsidian_rag.store.base import QueryResult as QR
     query_embedding = get_query_embedding(req.query)
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=req.top_k,
-        include=["documents", "metadatas", "distances"],
-    )
+    results = store.query(query_embedding, n=req.top_k, collection=collection_name)
     chunks = []
-    if results["ids"] and results["ids"][0]:
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        ):
-            score = 1.0 - dist
-            if score >= req.min_score:
-                display = meta.get("display_text", doc)
-                chunks.append(ChunkResult(
-                    text=display,
-                    score=round(score, 4),
-                    source_path=meta.get("source_path", ""),
-                    note_title=meta.get("note_title", ""),
-                    section_header=meta.get("section_header", ""),
-                    source_type=meta.get("source_type", "markdown"),
-                    repo_name=meta.get("repo_name"),
-                    symbol_type=meta.get("symbol_type"),
-                ))
+    for r in results:
+        if r.score >= req.min_score:
+            display = r.metadata.get("display_text", r.document)
+            chunks.append(ChunkResult(
+                text=display,
+                score=round(r.score, 4),
+                source_path=r.metadata.get("source_path", ""),
+                note_title=r.metadata.get("note_title", ""),
+                section_header=r.metadata.get("section_header", ""),
+                source_type=r.metadata.get("source_type", "markdown"),
+                repo_name=r.metadata.get("repo_name"),
+                symbol_type=r.metadata.get("symbol_type"),
+            ))
     return chunks
+
+
+def _count_repo_chunks(store, repo_name: str) -> int:
+    """Count code chunks belonging to a specific repo (best-effort)."""
+    col_name = settings.repos.collection_name
+    try:
+        from obsidian_rag.store.chroma_store import ChromaVectorStore
+        if isinstance(store, ChromaVectorStore):
+            col = store._col(col_name)
+            result = col.get(where={"repo_name": {"$eq": repo_name}}, include=[])
+            return len(result["ids"]) if result["ids"] else 0
+    except ImportError:
+        pass
+    try:
+        from obsidian_rag.store.qdrant_store import QdrantVectorStore
+        if isinstance(store, QdrantVectorStore):
+            qdrant_models = store._import_qdrant()
+            result = store._client.count(
+                collection_name=col_name,
+                count_filter=qdrant_models.Filter(
+                    must=[qdrant_models.FieldCondition(
+                        key="repo_name",
+                        match=qdrant_models.MatchValue(value=repo_name),
+                    )]
+                ),
+            )
+            return result.count
+    except ImportError:
+        pass
+    return 0
 
 
 @app.post("/query", response_model=QueryResponse)
@@ -195,8 +210,8 @@ def query(req: QueryRequest):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query vazia")
     start = time.time()
-    collection = _get_collection()
-    chunks = _query_collection(collection, req)
+    store = _get_store()
+    chunks = _query_store(store, "obsidian_vault", req)
     elapsed_ms = (time.time() - start) * 1000
     return QueryResponse(results=chunks, query=req.query, elapsed_ms=round(elapsed_ms, 1))
 
@@ -213,12 +228,8 @@ def query_code(req: CodeQueryRequest):
         raise HTTPException(status_code=404, detail="Sem repos configurados em rag.toml")
 
     start = time.time()
-    try:
-        collection = _get_code_collection()
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Coleção de código indisponível: {e}")
-
-    chunks = _query_collection(collection, req)
+    store = _get_store()
+    chunks = _query_store(store, settings.repos.collection_name, req)
 
     # Filtros pós-retrieval
     if req.repo:
@@ -242,12 +253,8 @@ def repos():
         code_chunks = 0
         if settings.repos.paths:
             try:
-                code_col = _get_code_collection()
-                result = code_col.get(
-                    where={"repo_name": {"$eq": r["name"]}},
-                    include=[],
-                )
-                code_chunks = len(result["ids"]) if result["ids"] else 0
+                store = _get_store()
+                code_chunks = _count_repo_chunks(store, r["name"])
             except Exception:
                 pass
 
@@ -401,7 +408,7 @@ def serve():
     port = settings.api.port
 
     # Security: refuse 0.0.0.0 without API key
-    if host == "0.0.0.0" and not settings.api.api_key:
+    if host == "0.0.0.0" and not settings.api.api_key:  # nosec B104
         import sys
         print(
             "ERRO: API exposta em 0.0.0.0 sem api_key configurada.\n"

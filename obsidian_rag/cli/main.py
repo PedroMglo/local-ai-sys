@@ -90,6 +90,10 @@ def main() -> None:
     schedule_sub.add_parser("remove", help="Remover agendamento")
     schedule_sub.add_parser("status", help="Estado do agendamento")
 
+    # --- rag migrate ---
+    from obsidian_rag.cli.migrate_cmd import add_migrate_parser
+    add_migrate_parser(sub)
+
     # --- Parse ---
     args = parser.parse_args()
 
@@ -144,6 +148,10 @@ def main() -> None:
     elif args.command == "schedule":
         from obsidian_rag.cli.schedule_cmd import run_schedule
         run_schedule(args)
+
+    elif args.command == "migrate":
+        from obsidian_rag.cli.migrate_cmd import run_migrate
+        run_migrate(args)
 
     else:
         parser.print_help()
