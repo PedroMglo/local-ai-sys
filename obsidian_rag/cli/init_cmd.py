@@ -303,7 +303,7 @@ graph_cache_ttl = 300
 host = "{host}"
 port = 8484
 query_top_k = 10
-api_key = "{api_key}"
+api_key = ""                 # não guardar segredos em ficheiro; definir via env RAG_API_KEY
 rate_limit = 60
 chat_rate_limit = 20
 
@@ -454,6 +454,8 @@ def run_init(args: Namespace) -> None:
             api_key = secrets.token_urlsafe(32)
             print("  ✓ API key gerada.")
             print("  Guarda esta chave! Necessária para aceder à API.")
+            print("  Segurança: a chave NÃO será guardada em rag.toml.")
+            print(f"  Define a variável de ambiente: RAG_API_KEY='{api_key}'")
     print()
 
     # --- Sync backend ---
