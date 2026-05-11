@@ -258,6 +258,13 @@ class IngestPipeline:
 
         self._result.elapsed_seconds = time.monotonic() - start
 
+        # --- BM25 sparse index rebuild ---
+        if not self._abort.is_set() and self._result.chunks_stored > 0:
+            try:
+                self._rebuild_bm25_index()
+            except Exception as e:
+                log.warning("BM25 index rebuild skipped: %s", e)
+
         status = "completed" if not self._abort.is_set() else "aborted"
         error_msg = "; ".join(self._result.errors) if self._result.errors else None
         self._manifest.finish_run(run_id, status=status, error=error_msg)
@@ -741,3 +748,90 @@ class IngestPipeline:
             self._result.stale_deleted += deleted
 
         log.info("Deleted %d stale chunks from %s", deleted, source.name)
+
+    # -- BM25 sparse index --
+
+    def _rebuild_bm25_index(self) -> None:
+        """Scroll all docs from collection, fit BM25, upsert sparse vectors."""
+        from obsidian_rag.retrieval.sparse import BM25Vectorizer, tokenize
+
+        store = self._store
+        collection = self._collection_name
+
+        # 1. Scroll all documents
+        all_docs: list[tuple[str, str]] = []  # (id, text)
+        try:
+            from obsidian_rag.store.qdrant_store import QdrantVectorStore
+            if not isinstance(store, QdrantVectorStore):
+                log.debug("BM25 rebuild: store is not QdrantVectorStore, skipping")
+                return
+        except ImportError:
+            return
+
+        offset = None
+        while True:
+            scroll_kwargs: dict = {
+                "collection_name": collection,
+                "limit": 500,
+                "with_payload": ["_id", "_document"],
+                "with_vectors": False,
+            }
+            if offset is not None:
+                scroll_kwargs["offset"] = offset
+            points, next_offset = store._client.scroll(**scroll_kwargs)
+            for p in points:
+                if p.payload:
+                    rid = p.payload.get("_id", "")
+                    doc = p.payload.get("_document", "")
+                    if rid and doc:
+                        all_docs.append((rid, doc))
+            if next_offset is None:
+                break
+            offset = next_offset
+
+        if not all_docs:
+            return
+
+        # 2. Tokenize corpus and fit BM25
+        corpus_tokens = [tokenize(doc) for _, doc in all_docs]
+        bm25 = BM25Vectorizer()
+        bm25.fit(corpus_tokens)
+
+        # 3. Save model
+        try:
+            from obsidian_rag.config import settings
+            model_path = Path(settings.paths.data_dir) / "bm25" / f"{collection}.json"
+        except Exception:
+            model_path = Path("data/qdrant/bm25") / f"{collection}.json"
+        bm25.save(model_path)
+        log.info("BM25: fitted on %d docs, vocab=%d → %s", len(all_docs), bm25.vocab_size, model_path)
+
+        # 4. Generate sparse vectors and upsert in batches
+        from obsidian_rag.store.qdrant_store import _str_to_uint
+
+        models = store._models
+        batch_size = 100
+        for i in range(0, len(all_docs), batch_size):
+            batch = all_docs[i : i + batch_size]
+            points_update = []
+            for (rid, _doc), tokens in zip(batch, corpus_tokens[i : i + batch_size]):
+                sv = bm25.transform(tokens, doc_len=len(tokens))
+                if sv["indices"]:
+                    points_update.append(
+                        models.PointStruct(
+                            id=_str_to_uint(rid),
+                            vector={
+                                "bm25": models.SparseVector(
+                                    indices=sv["indices"],
+                                    values=sv["values"],
+                                ),
+                            },
+                        )
+                    )
+            if points_update:
+                store._client.upsert(
+                    collection_name=collection,
+                    points=points_update,
+                )
+
+        print(f"  [bm25] Indexed {len(all_docs)} docs (vocab={bm25.vocab_size})")
