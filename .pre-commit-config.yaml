@@ -48,7 +48,7 @@ repos:
       - id: gitleaks
 
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.6
+    rev: 1.9.4
     hooks:
       - id: bandit
         args:
@@ -60,7 +60,7 @@ repos:
 
   # ── Lint (espelha CI: ruff check) ──────────────────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.13
+    rev: v0.15.12
     hooks:
       - id: ruff
         files: ^obsidian_rag/
