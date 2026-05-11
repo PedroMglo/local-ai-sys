@@ -85,7 +85,7 @@ jobs:
 
       - name: Upload security reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: scheduled-source-security-reports
           path: |
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload container security report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: scheduled-container-security-report
           path: trivy-image-report.txt
