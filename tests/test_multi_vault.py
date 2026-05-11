@@ -87,7 +87,7 @@ class TestSyncVaultFilter:
     """sync_notes() vault_filter parameter."""
 
     @patch("obsidian_rag.pipeline.sync.sync_vault")
-    @patch("obsidian_rag.pipeline.sync.create_store")
+    @patch("obsidian_rag.pipeline.sync.get_store")
     @patch("obsidian_rag.pipeline.sync.clear_embed_cache")
     @patch("obsidian_rag.pipeline.sync.IngestManifest")
     @patch("obsidian_rag.pipeline.sync.IngestPipeline")
@@ -173,7 +173,7 @@ class TestSyncVaultFilter:
         assert "NonExistent" in captured.out
 
     @patch("obsidian_rag.pipeline.sync.sync_vault")
-    @patch("obsidian_rag.pipeline.sync.create_store")
+    @patch("obsidian_rag.pipeline.sync.get_store")
     @patch("obsidian_rag.pipeline.sync.clear_embed_cache")
     @patch("obsidian_rag.pipeline.sync.IngestManifest")
     @patch("obsidian_rag.pipeline.sync.IngestPipeline")

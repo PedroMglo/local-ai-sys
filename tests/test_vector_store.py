@@ -1,9 +1,12 @@
 """Parametrized tests for the VectorStore protocol.
 
-Tests run against QdrantVectorStore (embedded mode).
+Tests run against QdrantVectorStore in embedded mode by default.
+Set QDRANT_TEST_URL=http://localhost:6333 to run against a live server.
 """
 
 from __future__ import annotations
+
+import os
 
 import pytest
 
@@ -14,12 +17,17 @@ from obsidian_rag.store.base import QueryResult, VectorStore
 # Fixtures
 # ---------------------------------------------------------------------------
 
+_QDRANT_TEST_URL = os.environ.get("QDRANT_TEST_URL", "")
+
+
 def _make_qdrant(tmp_path):
     try:
         from obsidian_rag.store.qdrant_store import QdrantVectorStore
     except ImportError:
         pytest.skip("qdrant-client not installed")
     try:
+        if _QDRANT_TEST_URL:
+            return QdrantVectorStore(url=_QDRANT_TEST_URL)
         return QdrantVectorStore(data_dir=tmp_path / "qdrant_data")
     except ImportError:
         pytest.skip("qdrant-client not installed")
@@ -211,6 +219,7 @@ class TestFactory:
 
     def test_create_store_qdrant(self, tmp_path):
         """create_store(backend='qdrant') returns QdrantVectorStore."""
+        pytest.importorskip("qdrant_client", reason="qdrant-client not installed")
         from obsidian_rag.store.base import create_store
         from obsidian_rag.store.qdrant_store import QdrantVectorStore
 
@@ -221,6 +230,17 @@ class TestFactory:
         from obsidian_rag.store.base import create_store
         with pytest.raises(ValueError, match="Unknown vector store"):
             create_store(backend="nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+class TestHealth:
+
+    def test_health_returns_true(self, store):
+        """health() returns True when the backend is reachable."""
+        assert store.health() is True
 
 
 # ---------------------------------------------------------------------------

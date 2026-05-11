@@ -159,17 +159,17 @@ class TestThreadSafeSingletons:
     """Verify singletons use locking."""
 
     def test_lock_exists(self):
-        from obsidian_rag.retrieval import rag
-        assert hasattr(rag, '_lock')
-        assert isinstance(rag._lock, type(threading.Lock()))
+        import obsidian_rag.store as store_mod
+        assert hasattr(store_mod, '_lock')
+        assert isinstance(store_mod._lock, type(threading.Lock()))
 
     def test_reset_collections_clears_all(self):
         from obsidian_rag.retrieval.rag import _reset_collections
-        import obsidian_rag.retrieval.rag as rag_mod
-        # Set dummy value
-        rag_mod._store = "dummy_store"
+        import obsidian_rag.store as store_mod
+        # Set dummy value directly on the store singleton
+        store_mod._store = "dummy_store"
         _reset_collections()
-        assert rag_mod._store is None
+        assert store_mod._store is None
 
     def test_override_bypasses_singleton(self):
         from obsidian_rag.retrieval.rag import _get_store
