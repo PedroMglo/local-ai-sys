@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import hashlib
 from pathlib import Path
+from typing import Iterator
 
 from obsidian_rag.chunking.markdown import Chunk, chunk_note
 
@@ -24,6 +25,19 @@ from obsidian_rag.chunking.markdown import Chunk, chunk_note
 _REPO_DOC_EXTENSIONS = {".md", ".mdx", ".txt", ".rst", ".yaml", ".yml", ".toml", ".sh", ".env"}
 # Extensões de código Python
 _PYTHON_EXTENSION = ".py"
+
+# Extensões que tree-sitter pode tratar (se instalado)
+_TREESITTER_EXTENSIONS: dict[str, str] = {
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript",
+    ".ts": "typescript", ".tsx": "tsx",
+    ".java": "java",
+    ".go": "go",
+    ".rs": "rust",
+    ".c": "c", ".h": "c",
+    ".cpp": "cpp", ".cxx": "cpp", ".cc": "cpp", ".hpp": "cpp", ".hxx": "cpp",
+    ".cs": "c_sharp",
+    ".rb": "ruby",
+}
 
 
 def _compute_hash(text: str) -> str:
@@ -289,7 +303,8 @@ def chunk_file(path: Path, repo_dir: Path, cfg) -> list[Chunk]:
     """Processa um único ficheiro do repo → lista de Chunks.
 
     - .py  → chunking AST (funções, classes, módulo)
-    - resto → chunk_note() do chunker Markdown com source_type="repo_doc"
+    - JS/TS/Java/Go/Rust/C/C++/C#/Ruby → tree-sitter (se instalado)
+    - .md/.yaml/.toml/.sh etc. → chunk_note() do chunker Markdown
     """
     repo_name = repo_dir.name
     suffix = path.suffix.lower()
@@ -305,6 +320,20 @@ def chunk_file(path: Path, repo_dir: Path, cfg) -> list[Chunk]:
     if suffix == _PYTHON_EXTENSION:
         rel_path = str(path.relative_to(repo_dir))
         return _chunk_python_source(source, rel_path, repo_name, cfg)
+
+    # Tree-sitter languages
+    lang_key = _TREESITTER_EXTENSIONS.get(suffix)
+    if lang_key is not None:
+        rel_path = str(path.relative_to(repo_dir))
+        try:
+            from obsidian_rag.chunking.treesitter import chunk_treesitter, is_available
+            if is_available():
+                return chunk_treesitter(source, rel_path, repo_name, lang_key, cfg)
+        except ImportError:
+            pass
+        # Fallback to text chunking if tree-sitter not installed
+        note_title = Path(rel_path).name
+        return _chunk_text_fallback(source, rel_path, repo_name, note_title, cfg)
 
     if suffix in _REPO_DOC_EXTENSIONS:
         # Reutiliza o chunker Markdown com metadata enriquecida
@@ -325,6 +354,7 @@ _IGNORE_DIRS = {
     ".git", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache",
     ".ruff_cache", "node_modules", "dist", "build", ".eggs", "*.egg-info",
     "logs", "models", "output", "rag", "input", "graphify-out", "data",
+    "site-packages", "source",
 }
 
 _IGNORE_FILES = {
@@ -333,13 +363,19 @@ _IGNORE_FILES = {
 }
 
 
+def _is_venv_dir(part: str) -> bool:
+    """True se o nome do directório parece ser um virtual environment."""
+    low = part.lower()
+    return low.startswith(".venv") or low.startswith("venv") or low == "env"
+
+
 def _should_skip(path: Path, repo_dir: Path) -> bool:
     """True se o ficheiro deve ser ignorado."""
     rel = path.relative_to(repo_dir)
     parts = rel.parts
     # Ignorar dirs especiais
     for part in parts[:-1]:  # só dirs (não o filename)
-        if part in _IGNORE_DIRS or part.endswith(".egg-info"):
+        if part in _IGNORE_DIRS or part.endswith(".egg-info") or _is_venv_dir(part):
             return True
     # Ignorar ficheiros específicos
     if path.name in _IGNORE_FILES:
@@ -358,7 +394,7 @@ def _should_skip(path: Path, repo_dir: Path) -> bool:
 def chunk_repo(repo_dir: Path | str, cfg=None) -> list[Chunk]:
     """Processa todos os ficheiros relevantes de um repo git.
 
-    Retorna lista de Chunks compatível com sync_to_chroma().
+    Retorna lista de Chunks compatível com o pipeline de ingestão.
     """
     from obsidian_rag.config import settings as _settings
     if cfg is None:
@@ -368,18 +404,27 @@ def chunk_repo(repo_dir: Path | str, cfg=None) -> list[Chunk]:
     if not repo_dir.exists():
         raise FileNotFoundError(f"Repo não encontrado: {repo_dir}")
 
-    # Extensões a processar
-    valid_extensions = {_PYTHON_EXTENSION} | _REPO_DOC_EXTENSIONS
-    all_files = sorted(repo_dir.rglob("*"))
-
     all_chunks: list[Chunk] = []
-    for path in all_files:
+    for path in iter_repo_files(repo_dir):
+        all_chunks.extend(chunk_file(path, repo_dir, cfg))
+
+    return all_chunks
+
+
+def iter_repo_files(repo_dir: Path | str) -> Iterator[Path]:
+    """Yield valid file paths from a repo, filtering ignored dirs/files/extensions.
+
+    This is the streaming equivalent of the scan loop in chunk_repo().
+    Used by the bounded ingest pipeline to process files one at a time.
+    """
+    repo_dir = Path(repo_dir).expanduser().resolve()
+    valid_extensions = {_PYTHON_EXTENSION} | _REPO_DOC_EXTENSIONS | set(_TREESITTER_EXTENSIONS.keys())
+
+    for path in sorted(repo_dir.rglob("*")):
         if not path.is_file():
             continue
         if _should_skip(path, repo_dir):
             continue
         if path.suffix.lower() not in valid_extensions:
             continue
-        all_chunks.extend(chunk_file(path, repo_dir, cfg))
-
-    return all_chunks
+        yield path

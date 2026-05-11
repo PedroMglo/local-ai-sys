@@ -37,7 +37,7 @@ def _graph_build(*, force: bool = False, repo: str | None = None) -> None:
             sys.exit(1)
 
     try:
-        from obsidian_rag.graph.builder import build_graph, build_graphs
+        from obsidian_rag.pipeline.graph.builder import build_graph, build_graphs
     except ImportError:
         print("✗ graphifyy não está instalado. Instala com: pip install -e .")
         sys.exit(1)
@@ -55,14 +55,14 @@ def _graph_build(*, force: bool = False, repo: str | None = None) -> None:
 
     # Export to Obsidian vault
     try:
-        from obsidian_rag.graph.obsidian_export import export_all
+        from obsidian_rag.pipeline.graph.obsidian_export import export_all
         export_all(force=force)
     except Exception as e:
         print(f"⚠ Exportação para vault: {e}")
 
     # Invalidate cache
     try:
-        from obsidian_rag.graph.cache import graph_cache
+        from obsidian_rag.pipeline.graph.cache import graph_cache
         graph_cache.invalidate()
     except Exception:
         pass

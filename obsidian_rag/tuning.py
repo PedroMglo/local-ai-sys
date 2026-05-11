@@ -34,6 +34,8 @@ class ResourceInfo:
     cpu_percent: float          # % média actual
     disk_free_gb: float         # partição do data_dir
     gpu_nvidia: bool            # nvidia-smi encontrado
+    gpu_vram_total_gb: float = 0.0   # VRAM total (via pynvml)
+    gpu_vram_free_gb: float = 0.0    # VRAM livre (via pynvml)
 
 
 def detect_resources(data_dir: str | None = None) -> ResourceInfo:
@@ -58,6 +60,18 @@ def detect_resources(data_dir: str | None = None) -> ResourceInfo:
     # GPU detection — simple check for nvidia-smi binary
     gpu = shutil.which("nvidia-smi") is not None
 
+    # VRAM detection via pynvml (optional, fails gracefully)
+    vram_total = 0.0
+    vram_free = 0.0
+    if gpu:
+        try:
+            from obsidian_rag.pipeline.governor import _read_vram
+            used, total, _pct = _read_vram()
+            vram_total = total
+            vram_free = round(total - used, 2) if total > 0 else 0.0
+        except Exception:
+            pass
+
     return ResourceInfo(
         ram_total_gb=round(mem.total / (1024 ** 3), 1),
         ram_available_gb=round(mem.available / (1024 ** 3), 1),
@@ -66,6 +80,8 @@ def detect_resources(data_dir: str | None = None) -> ResourceInfo:
         cpu_percent=cpu_pct,
         disk_free_gb=round(disk_free, 1),
         gpu_nvidia=gpu,
+        gpu_vram_total_gb=vram_total,
+        gpu_vram_free_gb=vram_free,
     )
 
 
@@ -88,20 +104,41 @@ def auto_tune(perf: "PerformanceConfig") -> "PerformanceConfig":
         return perf
 
     # --- max_parallel_jobs ---
-    auto_jobs = max(1, min(res.cpu_cores // 4, 8))
+    # Conservative: at most cpu_cores // 6, capped at 4
+    auto_jobs = max(1, min(res.cpu_cores // 6, 4))
 
     # --- embedding_batch_size ---
+    # Conservative to avoid RAM spikes during Ollama embedding calls
     if res.ram_total_gb < 8:
-        auto_batch = 25
+        auto_batch = 15
     elif res.ram_total_gb < 16:
-        auto_batch = 50
+        auto_batch = 25
     else:
-        auto_batch = 100
+        auto_batch = 30
+
+    # --- GPU VRAM boost ---
+    # With ≥6GB VRAM, bge-m3 uses ~0.5GB → plenty of headroom for larger batches
+    auto_batch_max_chars = perf.embedding_batch_max_chars
+    auto_graph_parallel = perf.graph_parallel_jobs
+    if res.gpu_vram_total_gb >= 6.0:
+        auto_batch = max(auto_batch, 50)
+        auto_batch_max_chars = max(auto_batch_max_chars, 60000)
+        auto_graph_parallel = max(auto_graph_parallel, 2)
+
+    # --- parser_workers ---
+    # Conservative: avoid fork()/spawn() overhead on constrained machines
+    if res.ram_available_gb < 8:
+        auto_parser_workers = 1        # in-process, no fork overhead
+    elif res.ram_available_gb < 16:
+        auto_parser_workers = min(2, perf.parser_workers)
+    else:
+        auto_parser_workers = min(3, max(1, res.cpu_cores // 8))
 
     # --- If RAM available is critically low, reduce everything ---
     if res.ram_available_gb < 4:
         auto_jobs = max(1, auto_jobs // 2)
         auto_batch = max(10, auto_batch // 2)
+        auto_parser_workers = 1
         log.info("Auto-tune: RAM disponível baixa (%.1f GB) — limites reduzidos", res.ram_available_gb)
 
     result = PerformanceConfig(
@@ -112,12 +149,28 @@ def auto_tune(perf: "PerformanceConfig") -> "PerformanceConfig":
         embedding_batch_size=auto_batch,
         embedding_timeout=perf.embedding_timeout,
         query_timeout_seconds=perf.query_timeout_seconds,
+        graph_timeout=perf.graph_timeout,
+        enrich_timeout=perf.enrich_timeout,
+        graph_parallel_jobs=auto_graph_parallel,
+        parser_workers=auto_parser_workers,
+        embedding_batch_max_chars=auto_batch_max_chars,
+        chunks_queue_max=perf.chunks_queue_max,
+        files_queue_max=perf.files_queue_max,
+        pause_memory_percent=perf.pause_memory_percent,
+        abort_memory_percent=perf.abort_memory_percent,
+        max_swap_percent=perf.max_swap_percent,
+        pause_swap_percent=perf.pause_swap_percent,
+        abort_swap_percent=perf.abort_swap_percent,
     )
 
     log.info(
-        "Auto-tune: RAM=%.0fGB CPU=%d cores GPU=%s → jobs=%d batch=%d",
-        res.ram_total_gb, res.cpu_cores, "✓" if res.gpu_nvidia else "✗",
+        "Auto-tune: RAM=%.0fGB (%.0fGB free) CPU=%d cores GPU=%s VRAM=%.1fGB (%.1fGB free) "
+        "→ jobs=%d batch=%d parser_workers=%d graph_parallel=%d",
+        res.ram_total_gb, res.ram_available_gb, res.cpu_cores,
+        "✓" if res.gpu_nvidia else "✗",
+        res.gpu_vram_total_gb, res.gpu_vram_free_gb,
         result.max_parallel_jobs, result.embedding_batch_size,
+        result.parser_workers, result.graph_parallel_jobs,
     )
 
     return result
@@ -139,37 +192,52 @@ class ThrottleAdvice:
 def should_throttle(perf: "PerformanceConfig", data_dir: str | None = None) -> ThrottleAdvice:
     """Verifica se o sistema está sob pressão e recomenda acção.
 
-    Chamado antes de cada repo no sync pipeline.
+    Thin wrapper around :class:`ResourceGovernor` for backward compatibility.
+    Creates a governor, takes a single sample, and maps the action to
+    ``ThrottleAdvice``.
     """
-    try:
-        res = detect_resources(data_dir)
-    except Exception:
-        return ThrottleAdvice()
+    from obsidian_rag.pipeline.governor import GovernorAction, ResourceGovernor
 
-    reasons: list[str] = []
-    pause = False
-    reduce = False
-    low_disk = False
+    gov = ResourceGovernor(perf, data_dir=data_dir, interval=1.0)
+    # Take one synchronous sample (start/stop immediately)
+    gov.start()
+    action = gov.check()
+    snap = gov.snapshot()
+    gov.stop()
 
-    if res.ram_percent > perf.max_memory_percent + 10:
-        # Critical: >10% above threshold
-        pause = True
-        reasons.append(f"RAM {res.ram_percent:.0f}% (limite: {perf.max_memory_percent}%)")
-    elif res.ram_percent > perf.max_memory_percent:
-        reduce = True
-        reasons.append(f"RAM {res.ram_percent:.0f}% acima do limite ({perf.max_memory_percent}%)")
+    if action is GovernorAction.ABORT:
+        reasons = []
+        if snap and snap.disk_free_gb < 1.0:
+            reasons.append(f"Disco: apenas {snap.disk_free_gb:.1f} GB livres")
+        if snap and snap.ram_percent >= perf.abort_memory_percent:
+            reasons.append(f"RAM {snap.ram_percent:.0f}% (abort: {perf.abort_memory_percent}%)")
+        if snap and snap.swap_percent >= getattr(perf, "abort_swap_percent", 80):
+            reasons.append(f"Swap {snap.swap_percent:.0f}% ({snap.swap_used_gb:.1f} GB)")
+        return ThrottleAdvice(
+            pause_sync=True,
+            low_disk=bool(snap and snap.disk_free_gb < 1.0),
+            reason="; ".join(reasons) if reasons else "recursos críticos",
+        )
 
-    if res.cpu_percent > perf.max_cpu_percent + 10:
-        reduce = True
-        reasons.append(f"CPU {res.cpu_percent:.0f}% acima do limite ({perf.max_cpu_percent}%)")
+    if action is GovernorAction.PAUSE:
+        reasons = []
+        if snap and snap.ram_percent >= perf.pause_memory_percent:
+            reasons.append(f"RAM {snap.ram_percent:.0f}% (pause: {perf.pause_memory_percent}%)")
+        if snap and snap.swap_percent >= getattr(perf, "pause_swap_percent", 60):
+            reasons.append(f"Swap {snap.swap_percent:.0f}% ({snap.swap_used_gb:.1f} GB)")
+        return ThrottleAdvice(pause_sync=True, reason="; ".join(reasons) if reasons else "")
 
-    if res.disk_free_gb < 1.0:
-        low_disk = True
-        reasons.append(f"Disco: apenas {res.disk_free_gb:.1f} GB livres")
+    if action in (GovernorAction.REDUCE, GovernorAction.THROTTLE):
+        reasons = []
+        if snap and snap.ram_percent >= perf.max_memory_percent:
+            reasons.append(f"RAM {snap.ram_percent:.0f}% acima do limite ({perf.max_memory_percent}%)")
+        if snap and snap.cpu_percent > perf.max_cpu_percent + 10:
+            reasons.append(f"CPU {snap.cpu_percent:.0f}% acima do limite ({perf.max_cpu_percent}%)")
+        if snap and snap.swap_percent >= getattr(perf, "max_swap_percent", 40):
+            reasons.append(f"Swap {snap.swap_percent:.0f}% ({snap.swap_used_gb:.1f} GB)")
+        return ThrottleAdvice(
+            reduce_workers=True,
+            reason="; ".join(reasons) if reasons else "",
+        )
 
-    return ThrottleAdvice(
-        pause_sync=pause,
-        reduce_workers=reduce,
-        low_disk=low_disk,
-        reason="; ".join(reasons) if reasons else "",
-    )
+    return ThrottleAdvice()

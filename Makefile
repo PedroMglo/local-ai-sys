@@ -2,7 +2,7 @@
 # Atalhos para os comandos mais comuns
 
 .PHONY: install init up serve sync graph doctor test backup clean \
-        lint typecheck test-cov ci docker-build docker-check
+        lint typecheck test-cov ci docker-build docker-check qdrant qdrant-down
 
 VENV := .venv/bin
 
@@ -56,3 +56,12 @@ docker-build:
 
 docker-check:
 	docker compose config
+
+# ── Qdrant server mode ────────────────────────────────────────────────────
+qdrant:
+	docker compose --profile qdrant up -d
+	@echo "Qdrant server a correr em http://localhost:6333"
+	@echo "Healthcheck: curl -s http://localhost:6333/healthz"
+
+qdrant-down:
+	docker compose --profile qdrant down

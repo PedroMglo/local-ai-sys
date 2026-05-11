@@ -17,3 +17,31 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Qdrant vector database — server mode para concorrência real
+  # Start with: docker compose --profile qdrant up -d
+  # Depois:     rag.toml → qdrant_url = "http://localhost:6333"
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    ports:
+      - "127.0.0.1:6333:6333" # REST API
+      - "127.0.0.1:6334:6334" # gRPC
+    volumes:
+      - ./data/qdrant_server:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      # Payloads (metadata) em disco — reduz RAM em idle
+      - QDRANT__STORAGE__ON_DISK_PAYLOAD=true
+      # Vectores >20MB mapeados via mmap (kernel liberta páginas não usadas)
+      - QDRANT__STORAGE__MMAP_THRESHOLD_KB=20480
+    mem_limit: 512m
+    mem_reservation: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+    profiles:
+      - qdrant

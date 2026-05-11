@@ -4,8 +4,8 @@
 
 [paths]
 source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
-data_dir = "data/chroma"        # relativo à raiz do projeto
-vault_dir = "~/Obsidian/Vault"  # fonte principal — expandido em runtime
+data_dir = "data/qdrant"        # relativo à raiz do projeto
+vault_dirs = ["~/Obsidian/Vault", "~/Obsidian/Work"]  # multi-vault (overrides vault_dir)
 
 # =============================================================================
 # SYNC — como o Vault Obsidian é lido pelo pipeline
@@ -121,6 +121,13 @@ log_format = "text"
 [pipeline]
 # Número máximo de workers para sync paralelo de repos (1 = sequencial)
 max_workers = 4
+# Motor de execução do pipeline:
+#   local — ProcessPoolExecutor (default, sem dependências extras)
+#   dask  — Dask distributed (requer: pip install obsidian-rag[dask])
+engine = "local"
+# Endereço do Dask scheduler (vazio = cria cluster local temporário)
+# Exemplo: "tcp://192.168.1.10:8786"
+dask_scheduler = ""
 
 # =============================================================================
 # PERFORMANCE — auto-tuning e limites de recursos
@@ -132,27 +139,69 @@ max_workers = 4
 # true — detecta hardware e ajusta limites automaticamente (sobrepõe valores manuais)
 # false — usa exactamente os valores configurados abaixo
 auto_tune = true
-# Percentagem máxima de CPU antes de reduzir workers durante sync
+# Percentagem máxima de CPU antes de throttle durante sync
 max_cpu_percent = 75
-# Percentagem máxima de RAM antes de pausar indexação
-max_memory_percent = 80
+# Percentagem máxima de RAM antes de reduzir carga (THROTTLE/REDUCE)
+max_memory_percent = 70
 # Cap máximo de workers paralelos (usado como limite do pipeline.max_workers)
 max_parallel_jobs = 4
-# Tamanho do batch para chamadas de embeddings
+# Tamanho do batch para chamadas de embeddings (GPU ≥6GB VRAM: auto-tune sobe para 50)
 embedding_batch_size = 50
 # Timeout máximo para chamadas HTTP de embeddings (segundos)
 embedding_timeout = 120
 # Timeout máximo por query (segundos)
 query_timeout_seconds = 30
+# Timeout máximo por subprocess graphify (segundos) — 0 = sem limite
+graph_timeout = 900
+# Timeout máximo para chamadas LLM de enriquecimento de grafos (segundos)
+enrich_timeout = 180
+# Workers paralelos para graphify (subprocess por repo) — 1 = sequencial
+graph_parallel_jobs = 2
+# --- Bounded pipeline ---
+# Workers de parsing paralelo (1 = in-process sem fork, mais seguro)
+parser_workers = 1
+# Fechar batch de embedding quando soma de chars excede este valor (GPU ≥6GB: auto-tune sobe para 60000)
+embedding_batch_max_chars = 60000
+# Max chunks pendentes entre parser e embedder (backpressure)
+chunks_queue_max = 64
+# Max ficheiros pendentes entre scanner e parser
+files_queue_max = 128
+# Pausar pipeline quando RAM% excede este valor
+pause_memory_percent = 80
+# Abortar pipeline quando RAM% excede este valor
+abort_memory_percent = 90
+# --- Proteção de swap (previne swap thrashing / freeze) ---
+# Reduzir carga quando swap% excede este valor
+max_swap_percent = 40
+# Pausar pipeline quando swap% excede este valor
+pause_swap_percent = 60
+# Abortar pipeline quando swap% excede este valor
+abort_swap_percent = 80
 
 # =============================================================================
-# REPOSITÓRIOS GIT — indexação de código no ChromaDB
+# VECTOR STORE — backend de armazenamento vectorial
+# Backends disponíveis:
+#   qdrant — Qdrant (embedded sem server, ou server via qdrant_url)
+# RAG_STORE_* env vars sobrepõem estes valores
+# =============================================================================
+[store]
+backend = "qdrant"
+# URL do servidor Qdrant (vazio = modo embedded local). Exemplo: "http://localhost:6333"
+# Server mode recomendado para concorrência (múltiplos modelos/queries simultâneas)
+# Arrancar: docker compose --profile qdrant up -d  (ou: make qdrant)
+# Rollback para embedded: qdrant_url = ""
+qdrant_url = "http://localhost:6333"
+# API key para Qdrant Cloud (vazio = sem autenticação)
+qdrant_api_key = ""
+
+# =============================================================================
+# REPOSITÓRIOS GIT — indexação de código no Qdrant
 # RAG_REPOS_* env vars sobrepõem estes valores
 # =============================================================================
 [repos]
 # Lista de paths absolutos (ou ~) para repos git a indexar
-paths = ["~/ai-local/SPEECH-LAB", "~/Projects/ApacheSpark-CD", "~/ai-local/obsidian-rag"]
-# Coleção ChromaDB separada para código (não mistura com notas Obsidian)
+paths = ["~/ai-local/SPEECH-LAB", "~/Projects/ApacheSpark-CD", "~/ai-local/obsidian-rag","~/Projects/Git_Concepts","~/Projects/Python_Stud"]
+# Coleção Qdrant separada para código (não mistura com notas Obsidian)
 collection_name = "code_repos"
 
 [repos.chunking]
@@ -176,10 +225,11 @@ enabled = true
 backend = "ollama"
 # Modelo LLM para extracção semântica (vazio = usar default do backend)
 # ollama default: qwen2.5-coder:7b
-# Para repos complexos recomendam-se modelos de raciocínio:
-#   deepseek-r1:8b — melhor extracção semântica de relações
-#   qwen3:8b       — bom balanço velocidade/qualidade
-model = "deepseek-r1:8b"
+# Modelos recomendados (por velocidade):
+#   qwen2.5-coder:7b — code-optimized, rápido (~43 tok/s), sem overhead de reasoning
+#   qwen3:8b         — general-purpose, bom balanço velocidade/qualidade
+#   deepseek-r1:8b   — chain-of-thought (lento, gera <think> tokens extra)
+model = "qwen2.5-coder:7b"
 # Directório onde ficam os graph.json por repo (relativo à raiz do projecto)
 output_dir = "data/graphify"
 # Vault Obsidian dedicado para visualização dos grafos (notas Markdown)

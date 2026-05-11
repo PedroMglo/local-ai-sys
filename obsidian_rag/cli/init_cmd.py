@@ -14,7 +14,7 @@ from obsidian_rag.config import PROJECT_ROOT, config_exists
 _SYSTEM = platform.system()  # "Linux" | "Darwin" | "Windows"
 
 # Paths that must never be indexed — common across all OS
-_DANGEROUS_PATHS_UNIX = frozenset({
+_DANGEROUS_PATHS_UNIX = frozenset({  # nosec B108
     "/", "/bin", "/boot", "/dev", "/etc", "/lib", "/proc", "/root",
     "/sbin", "/sys", "/tmp", "/usr", "/var",
 })
@@ -264,7 +264,7 @@ def _generate_toml(
 
 [paths]
 source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
-data_dir = "data/chroma"
+data_dir = "data/qdrant"
 vault_dir = "{vault_dir}"       # fonte principal dos dados Obsidian
 
 [sync]
@@ -450,7 +450,7 @@ def run_init(args: Namespace) -> None:
     api_key = ""
     if not auto:
         if _ask_yn("Expor API em 0.0.0.0 (acesso remoto)?", default=False):
-            host = "0.0.0.0"
+            host = "0.0.0.0"  # nosec B104
             api_key = secrets.token_urlsafe(32)
             print("  ✓ API key gerada.")
             print("  Guarda esta chave! Necessária para aceder à API.")
@@ -490,7 +490,7 @@ def run_init(args: Namespace) -> None:
     print(f"✓ Configuração escrita em {toml_path}")
 
     # --- Create directories ---
-    dirs_to_create = ["data/chroma", "data/graphify"]
+    dirs_to_create = ["data/qdrant", "data/graphify"]
     if sync_backend != "direct":
         dirs_to_create.append("source")
     for d in dirs_to_create:

@@ -61,6 +61,7 @@ class PathsConfig:
     source_dir: Path
     data_dir: Path
     vault_dir: Path
+    vault_dirs: tuple[Path, ...]  # multi-vault support (includes vault_dir)
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,7 @@ class RepoChunkingConfig:
 @dataclass(frozen=True)
 class ReposConfig:
     paths: tuple[Path, ...]   # repos git a indexar
-    collection_name: str      # coleção ChromaDB separada
+    collection_name: str      # coleção Qdrant separada
     chunking: RepoChunkingConfig
 
 
@@ -174,8 +175,17 @@ _DEFAULT_EXCLUDE_PATTERNS = (
 
 
 @dataclass(frozen=True)
+class StoreConfig:
+    backend: str             # "qdrant"
+    qdrant_url: str          # Qdrant server URL (empty = embedded mode)
+    qdrant_api_key: str      # Qdrant Cloud API key (empty = none)
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     max_workers: int        # max parallel workers for repo sync
+    engine: str = "local"   # "local" (ProcessPoolExecutor) | "dask" (Dask distributed)
+    dask_scheduler: str = ""  # Dask scheduler address (empty = local cluster)
 
 
 @dataclass(frozen=True)
@@ -183,10 +193,24 @@ class PerformanceConfig:
     auto_tune: bool              # auto-detect resources and override limits
     max_cpu_percent: int         # throttle sync when CPU% exceeds this
     max_memory_percent: int      # throttle sync when RAM% exceeds this
-    max_parallel_jobs: int       # effective cap on workers (overrides pipeline.max_workers when auto_tune)
+    max_parallel_jobs: int       # effective cap on workers
     embedding_batch_size: int    # batch size for embedding calls
     embedding_timeout: int       # max seconds for embedding HTTP calls
     query_timeout_seconds: int   # max seconds for a single query
+    graph_timeout: int = 600     # max seconds for a single graphify subprocess
+    enrich_timeout: int = 180     # max seconds for LLM calls in graph enrichment
+    graph_parallel_jobs: int = 1  # parallel graphify subprocesses (1 = sequential)
+    # --- Bounded pipeline fields ---
+    parser_workers: int = 3              # concurrent file-parsing processes
+    embedding_batch_max_chars: int = 48000  # close embedding batch when total chars exceed this
+    chunks_queue_max: int = 128          # max pending chunks between parser and embedder
+    files_queue_max: int = 256           # max pending files between scanner and parser
+    pause_memory_percent: int = 80       # pause pipeline when RAM% exceeds this
+    abort_memory_percent: int = 90       # abort pipeline when RAM% exceeds this
+    # --- Swap protection ---
+    max_swap_percent: int = 40           # reduce when swap% exceeds this
+    pause_swap_percent: int = 60         # pause when swap% exceeds this
+    abort_swap_percent: int = 80         # abort when swap% exceeds this
 
 
 @dataclass(frozen=True)
@@ -202,6 +226,7 @@ class Settings:
     reranker: RerankerConfig
     context_policy: ContextPolicyConfig
     debug: DebugConfig
+    store: StoreConfig
     pipeline: PipelineConfig
     performance: PerformanceConfig
     sync: SyncConfig
@@ -213,10 +238,21 @@ def load_settings() -> Settings:
     raw = _load_toml()
 
     p = raw.get("paths", {})
+    vault_dir = _resolve_path(_env_override("paths", "vault_dir", p.get("vault_dir", "~/Obsidian/Vault")))
+
+    # Multi-vault: vault_dirs list (if present) takes precedence;
+    # otherwise fall back to [vault_dir] for backward compat.
+    raw_vault_dirs = p.get("vault_dirs", [])
+    if raw_vault_dirs:
+        vault_dirs = tuple(_resolve_path(vd) for vd in raw_vault_dirs)
+    else:
+        vault_dirs = (vault_dir,)
+
     paths = PathsConfig(
         source_dir=_resolve_path(_env_override("paths", "source_dir", p.get("source_dir", "source"))),
-        data_dir=_resolve_path(_env_override("paths", "data_dir", p.get("data_dir", "data/chroma"))),
-        vault_dir=_resolve_path(_env_override("paths", "vault_dir", p.get("vault_dir", "~/Obsidian/Vault"))),
+        data_dir=_resolve_path(_env_override("paths", "data_dir", p.get("data_dir", "data/qdrant"))),
+        vault_dir=vault_dir,
+        vault_dirs=vault_dirs,
     )
 
     o = raw.get("ollama", {})
@@ -317,9 +353,18 @@ def load_settings() -> Settings:
         log_format=_env_override("debug", "log_format", db.get("log_format", "text")),
     )
 
+    st = raw.get("store", {})
+    store = StoreConfig(
+        backend=_env_override("store", "backend", st.get("backend", "qdrant")),
+        qdrant_url=_env_override("store", "qdrant_url", st.get("qdrant_url", "")),
+        qdrant_api_key=_env_override("store", "qdrant_api_key", st.get("qdrant_api_key", "")),
+    )
+
     pl = raw.get("pipeline", {})
     pipeline = PipelineConfig(
         max_workers=_env_override("pipeline", "max_workers", pl.get("max_workers", 4)),
+        engine=_env_override("pipeline", "engine", pl.get("engine", "local")),
+        dask_scheduler=_env_override("pipeline", "dask_scheduler", pl.get("dask_scheduler", "")),
     )
 
     # Sync — optional section, defaults to backend="direct" (cross-platform)
@@ -338,11 +383,23 @@ def load_settings() -> Settings:
     performance = PerformanceConfig(
         auto_tune=_env_override("performance", "auto_tune", pf.get("auto_tune", True)),
         max_cpu_percent=_env_override("performance", "max_cpu_percent", pf.get("max_cpu_percent", 75)),
-        max_memory_percent=_env_override("performance", "max_memory_percent", pf.get("max_memory_percent", 80)),
+        max_memory_percent=_env_override("performance", "max_memory_percent", pf.get("max_memory_percent", 70)),
         max_parallel_jobs=_env_override("performance", "max_parallel_jobs", pf.get("max_parallel_jobs", 4)),
-        embedding_batch_size=_env_override("performance", "embedding_batch_size", pf.get("embedding_batch_size", 50)),
+        embedding_batch_size=_env_override("performance", "embedding_batch_size", pf.get("embedding_batch_size", 30)),
         embedding_timeout=_env_override("performance", "embedding_timeout", pf.get("embedding_timeout", 120)),
         query_timeout_seconds=_env_override("performance", "query_timeout_seconds", pf.get("query_timeout_seconds", 30)),
+        graph_timeout=_env_override("performance", "graph_timeout", pf.get("graph_timeout", 600)),
+        enrich_timeout=_env_override("performance", "enrich_timeout", pf.get("enrich_timeout", 180)),
+        graph_parallel_jobs=_env_override("performance", "graph_parallel_jobs", pf.get("graph_parallel_jobs", 1)),
+        parser_workers=_env_override("performance", "parser_workers", pf.get("parser_workers", 1)),
+        embedding_batch_max_chars=_env_override("performance", "embedding_batch_max_chars", pf.get("embedding_batch_max_chars", 48000)),
+        chunks_queue_max=_env_override("performance", "chunks_queue_max", pf.get("chunks_queue_max", 64)),
+        files_queue_max=_env_override("performance", "files_queue_max", pf.get("files_queue_max", 128)),
+        pause_memory_percent=_env_override("performance", "pause_memory_percent", pf.get("pause_memory_percent", 80)),
+        abort_memory_percent=_env_override("performance", "abort_memory_percent", pf.get("abort_memory_percent", 90)),
+        max_swap_percent=_env_override("performance", "max_swap_percent", pf.get("max_swap_percent", 40)),
+        pause_swap_percent=_env_override("performance", "pause_swap_percent", pf.get("pause_swap_percent", 60)),
+        abort_swap_percent=_env_override("performance", "abort_swap_percent", pf.get("abort_swap_percent", 80)),
     )
 
     # Auto-tune: adjust limits based on detected hardware
@@ -367,6 +424,7 @@ def load_settings() -> Settings:
         reranker=reranker,
         context_policy=context_policy,
         debug=debug,
+        store=store,
         pipeline=pipeline,
         performance=performance,
         sync=sync,

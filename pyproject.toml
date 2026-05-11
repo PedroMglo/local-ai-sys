@@ -5,7 +5,6 @@ description = "Local RAG pipeline — Obsidian Vault + Git repos + Graphify know
 requires-python = ">=3.11"
 
 dependencies = [
-    "chromadb>=0.5",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "httpx>=0.27",
@@ -24,6 +23,32 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.4",
     "types-requests>=2.31",
+    "pre-commit>=3.2",
+]
+qdrant = [
+    "qdrant-client>=1.9",
+]
+treesitter = [
+    "tree-sitter>=0.23",
+    "tree-sitter-javascript>=0.23",
+    "tree-sitter-typescript>=0.23",
+    "tree-sitter-java>=0.23",
+    "tree-sitter-go>=0.23",
+    "tree-sitter-rust>=0.23",
+    "tree-sitter-c>=0.23",
+    "tree-sitter-cpp>=0.23",
+    "tree-sitter-c-sharp>=0.23",
+    "tree-sitter-ruby>=0.23",
+]
+dask = [
+    "dask[distributed]>=2024.1",
+]
+gpu = [
+    "nvidia-ml-py>=12.0",
+]
+profile = [
+    "memray>=1.13",
+    "pytest-timeout>=2.3",
 ]
 
 [project.scripts]
@@ -61,4 +86,34 @@ omit = [
     "obsidian_rag/pipeline/sync.py",
     "obsidian_rag/pipeline/__main__.py",
     "obsidian_rag/cli/*",
+]
+
+[tool.bandit]
+exclude_dirs = [
+  ".git",
+  ".venv",
+  "venv",
+  "env",
+  "__pycache__",
+  "tests",
+  "build",
+  "dist",
+  "data",
+  "models",
+  "qdrant_storage",
+  "storage",
+  "embeddings"
+]
+
+skips = [
+  "B101",   # assert used (expected in tests)
+  "B104",   # bind all interfaces — guarded by api_key check in code
+  "B108",   # hardcoded tmp — frozenset of dangerous paths, not a temp file
+  "B110",   # try/except/pass (intentional silent fallback patterns)
+  "B112",   # try/except/continue (intentional)
+  "B310",   # urllib.urlopen — URL is a controlled local Ollama endpoint
+  "B404",   # import subprocess (required for system commands)
+  "B603",   # subprocess without shell=True (safe — no user input)
+  "B607",   # partial executable path (controlled paths)
+  "B608"    # SQL string formatting — placeholders are parameterised, not user input
 ]

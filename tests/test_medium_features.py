@@ -10,47 +10,47 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from obsidian_rag.pipeline.backup import backup_chroma, MAX_BACKUPS
+from obsidian_rag.pipeline.backup import backup_store, MAX_BACKUPS
 from obsidian_rag.retrieval.observe import _JsonFormatter
 
 
-class TestBackupChroma:
+class TestBackupStore:
     def test_creates_backup(self, tmp_path: Path):
-        chroma_dir = tmp_path / "chroma"
-        chroma_dir.mkdir()
-        (chroma_dir / "test.db").write_text("data")
+        store_dir = tmp_path / "store"
+        store_dir.mkdir()
+        (store_dir / "test.db").write_text("data")
         dest = tmp_path / "backups"
 
         with patch("obsidian_rag.pipeline.backup.settings") as mock_settings:
-            mock_settings.paths.data_dir = chroma_dir
-            result = backup_chroma(dest)
+            mock_settings.paths.data_dir = store_dir
+            result = backup_store(dest)
 
         assert result.exists()
         assert (result / "test.db").read_text() == "data"
 
     def test_rotates_old_backups(self, tmp_path: Path):
-        chroma_dir = tmp_path / "chroma"
-        chroma_dir.mkdir()
-        (chroma_dir / "test.db").write_text("data")
+        store_dir = tmp_path / "store"
+        store_dir.mkdir()
+        (store_dir / "test.db").write_text("data")
         dest = tmp_path / "backups"
         dest.mkdir()
 
         # Create MAX_BACKUPS + 1 existing backups
         for i in range(MAX_BACKUPS + 1):
-            (dest / f"chroma_backup_2024010{i}_000000").mkdir()
+            (dest / f"store_backup_2024010{i}_000000").mkdir()
 
         with patch("obsidian_rag.pipeline.backup.settings") as mock_settings:
-            mock_settings.paths.data_dir = chroma_dir
-            backup_chroma(dest)
+            mock_settings.paths.data_dir = store_dir
+            backup_store(dest)
 
-        backups = list(dest.glob("chroma_backup_*"))
+        backups = list(dest.glob("store_backup_*"))
         assert len(backups) <= MAX_BACKUPS
 
     def test_raises_on_missing_dir(self, tmp_path: Path):
         with patch("obsidian_rag.pipeline.backup.settings") as mock_settings:
             mock_settings.paths.data_dir = tmp_path / "nonexistent"
             with pytest.raises(FileNotFoundError):
-                backup_chroma()
+                backup_store()
 
 
 class TestJsonFormatter:

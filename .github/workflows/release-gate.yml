@@ -1,0 +1,192 @@
+name: Release Gate — Docker · Trivy · ZAP
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "compose.yml"
+      - "obsidian_rag/**"
+      - "pyproject.toml"
+      - ".github/workflows/release-gate.yml"
+      - ".github/scripts/install-trivy.sh"
+      - ".github/zap/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  release-gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      IMAGE_NAME: obsidian-rag:release-gate
+      CONTAINER_NAME: rag-release-gate
+      RAG_API_HOST: "0.0.0.0"
+      RAG_API_PORT: "8000"
+      HOST_PORT: "18484"
+      RAG_API_API_KEY: "ci-test-key"
+      TRIVY_VERSION: "0.70.0"
+      ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:stable
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: ${{ env.IMAGE_NAME }}
+          push: false
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Check container user is non-root
+        run: |
+          USER_ID=$(docker run --rm "$IMAGE_NAME" id -u)
+
+          if [ "$USER_ID" = "0" ]; then
+            echo "ERROR: Container corre como root"
+            exit 1
+          fi
+
+          echo "OK: Container corre como UID $USER_ID"
+
+      - name: Start API container
+        run: |
+          docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
+          docker run -d --name "$CONTAINER_NAME" \
+            -e RAG_API_HOST="$RAG_API_HOST" \
+            -e RAG_API_PORT="$RAG_API_PORT" \
+            -e RAG_API_API_KEY="$RAG_API_API_KEY" \
+            -p "$HOST_PORT:$RAG_API_PORT" \
+            "$IMAGE_NAME"
+
+      - name: Wait for health endpoint
+        run: |
+          for i in $(seq 1 45); do
+            if curl -sf "http://127.0.0.1:${HOST_PORT}/health" > /dev/null; then
+              echo "OK: /health respondeu após ${i}s"
+              exit 0
+            fi
+
+            if [ "$i" = "45" ]; then
+              echo "ERROR: /health não respondeu em 45s"
+              docker logs "$CONTAINER_NAME" || true
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+      - name: Validate health response
+        run: |
+          RESP=$(curl -sf "http://127.0.0.1:${HOST_PORT}/health")
+          echo "Response: $RESP"
+          echo "$RESP" | grep -q '"status":"ok"'
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            trivy-${{ runner.os }}-
+
+      - name: Install Trivy CLI
+        run: .github/scripts/install-trivy.sh
+
+      - name: Trivy image scan
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --format table \
+            --output trivy-image-release-gate.txt \
+            --exit-code 1 \
+            "$IMAGE_NAME"
+
+      - name: Prepare ZAP reports directory
+        run: |
+          mkdir -p zap-reports
+          chmod 777 zap-reports
+
+          if [ -f ".github/zap/zap-baseline.conf" ]; then
+            cp .github/zap/zap-baseline.conf zap-reports/zap-baseline.conf
+          fi
+
+      - name: OWASP ZAP baseline scan
+        shell: bash
+        run: |
+          ZAP_CONF_ARGS=()
+
+          if [ -f "zap-reports/zap-baseline.conf" ]; then
+            ZAP_CONF_ARGS=(-c zap-baseline.conf)
+          fi
+
+          docker run --rm --network host \
+            -v "${{ github.workspace }}/zap-reports:/zap/wrk:rw" \
+            "$ZAP_IMAGE" \
+            zap-baseline.py \
+              -t "http://127.0.0.1:${HOST_PORT}" \
+              "${ZAP_CONF_ARGS[@]}" \
+              -m 2 \
+              -r zap-baseline.html \
+              -w zap-baseline.md \
+              -J zap-baseline.json \
+              -I
+
+      - name: OWASP ZAP API scan if OpenAPI exists
+        shell: bash
+        run: |
+          if curl -sf "http://127.0.0.1:${HOST_PORT}/openapi.json" > /dev/null; then
+            echo "OpenAPI encontrado. A correr ZAP API scan..."
+
+            docker run --rm --network host \
+              -v "${{ github.workspace }}/zap-reports:/zap/wrk:rw" \
+              "$ZAP_IMAGE" \
+              zap-api-scan.py \
+                -t "http://127.0.0.1:${HOST_PORT}/openapi.json" \
+                -f openapi \
+                -r zap-api.html \
+                -w zap-api.md \
+                -J zap-api.json \
+                -I
+          else
+            echo "Sem /openapi.json público. A ignorar ZAP API scan."
+          fi
+
+      - name: Upload release gate reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-security-reports
+          path: |
+            trivy-image-release-gate.txt
+            zap-reports/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs "$CONTAINER_NAME" || true
+
+      - name: Stop API container
+        if: always()
+        run: docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true

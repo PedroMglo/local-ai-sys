@@ -5,8 +5,10 @@ determines it's needed AND retrieval quality passes the relevance gate.
 """
 
 import logging
-import threading
+import math as _math
+import time as _time
 import unicodedata
+from pathlib import Path as _Path
 
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import get_query_embedding
@@ -15,7 +17,8 @@ from obsidian_rag.retrieval.budget import allocate_budget, truncate_chunks, trun
 from obsidian_rag.retrieval.intent import detect_intent_full
 from obsidian_rag.retrieval.observe import QueryTrace
 from obsidian_rag.retrieval.router import _GRAPH_PATTERNS, _GRAPH_SIGNALS, ContextMode
-from obsidian_rag.store.chroma import get_client, get_collection
+from obsidian_rag.retrieval.sparse import BM25Vectorizer, tokenize
+from obsidian_rag.store import VectorStore, _reset_store, get_store
 
 log = logging.getLogger("obsidian_rag")
 
@@ -47,55 +50,45 @@ _NAVIGATION_SECTIONS = frozenset({
 })
 
 
-# === Collection singletons ===
-_lock = threading.Lock()
-_chroma_client = None
-_chroma_collection = None
-_code_collection = None
+# === VectorStore singleton (delegated to obsidian_rag.store) ===
 
 
-def _get_collection(*, _override=None):
-    """Lazy singleton for the obsidian_vault collection.
-
-    Args:
-        _override: inject a collection for testing (bypasses singleton).
-    """
-    global _chroma_client, _chroma_collection
-    if _override is not None:
-        return _override
-    if _chroma_collection is None:
-        with _lock:
-            if _chroma_collection is None:
-                _chroma_client = get_client()
-                _chroma_collection = get_collection(_chroma_client, name="obsidian_vault")
-    return _chroma_collection
-
-
-def _get_code_collection(*, _override=None):
-    """Lazy singleton for the code_repos collection.
-
-    Args:
-        _override: inject a collection for testing (bypasses singleton).
-    """
-    global _chroma_client, _code_collection
-    if _override is not None:
-        return _override
-    if _code_collection is None:
-        with _lock:
-            if _code_collection is None:
-                if _chroma_client is None:
-                    _chroma_client = get_client()
-                _code_collection = get_collection(_chroma_client, name=settings.repos.collection_name)
-    return _code_collection
+def _get_store(*, _override: VectorStore | None = None) -> VectorStore:
+    """Proxy to the process-wide singleton in obsidian_rag.store."""
+    return get_store(_override=_override)
 
 
 def _reset_collections():
     """Reset singletons — for testing only."""
-    global _chroma_client, _chroma_collection, _code_collection
-    with _lock:
-        _chroma_client = None
-        _chroma_collection = None
-        _code_collection = None
+    _reset_store()
+
+
+# === Collection-size cache (TTL 60 s) ===
+
+_count_cache: dict[str, tuple[int, float]] = {}
+_COUNT_TTL = 60.0
+
+
+def _cached_count(store: VectorStore, collection: str) -> int:
+    """Return collection size with 60 s TTL caching."""
+    now = _time.monotonic()
+    cached = _count_cache.get(collection)
+    if cached is not None and now - cached[1] < _COUNT_TTL:
+        return cached[0]
+    try:
+        n = store.count(collection=collection)
+    except Exception:
+        n = 0
+    _count_cache[collection] = (n, now)
+    return n
+
+
+def _scale_k_by_size(base_k: int, collection_size: int) -> int:
+    """Scale effective_k by log10(size / 1000) when collection > 1000."""
+    if collection_size <= 1000:
+        return base_k
+    factor = 1.0 + _math.log10(collection_size / 1000)
+    return max(3, min(30, int(base_k * factor)))
 
 
 # === Helpers ===
@@ -140,24 +133,53 @@ def _estimate_complexity(query: str) -> str:
     return "normal"
 
 
-def _search_chroma(collection, query_text: str, n: int) -> list[tuple[str, dict, float]]:
-    """Single ChromaDB vector search."""
+def _vector_search(store: VectorStore, query_text: str, n: int, *, collection: str = "obsidian_vault", filters: dict | None = None) -> list[tuple[str, dict, float]]:
+    """Hybrid search: dense embedding + BM25 sparse (when available)."""
     embedding = get_query_embedding(query_text)
-    results = collection.query(
-        query_embeddings=[embedding],
-        n_results=min(n * 3, 50),
-        include=["documents", "metadatas", "distances"],
+
+    # Try BM25 sparse query
+    sparse_query = _get_sparse_query(query_text, collection)
+
+    results = store.query(
+        embedding,
+        n=min(n * 3, 50),
+        collection=collection,
+        filters=filters,
+        sparse_query=sparse_query,
     )
-    if not results["ids"] or not results["ids"][0]:
-        return []
-    return [
-        (doc, meta, 1.0 - dist)
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        )
-    ]
+    return [(r.document, r.metadata, r.score) for r in results]
+
+
+# === BM25 sparse query helper ===
+
+_bm25_cache: dict[str, BM25Vectorizer | None] = {}  # collection → BM25Vectorizer
+
+
+def _get_sparse_query(query_text: str, collection: str) -> dict | None:
+    """Load BM25 model and transform query to sparse vector. Returns None if unavailable."""
+    if collection not in _bm25_cache:
+        try:
+            model_path = _Path(settings.paths.data_dir) / "bm25" / f"{collection}.json"
+            if model_path.exists():
+                loaded = BM25Vectorizer.load(model_path)
+                _bm25_cache[collection] = loaded
+                log.info("BM25: loaded model for %r (vocab=%d)", collection, loaded.vocab_size)
+            else:
+                _bm25_cache[collection] = None
+        except Exception as exc:
+            log.debug("BM25: could not load model for %r: %s", collection, exc)
+            _bm25_cache[collection] = None
+
+    bm25 = _bm25_cache.get(collection)
+    if bm25 is None:
+        return None
+
+    tokens = tokenize(query_text)
+    tokens = [t for t in tokens if t not in _STOP_WORDS]
+    if not tokens:
+        return None
+
+    return bm25.transform(tokens)
 
 
 def _deduplicate(chunks: list[tuple[str, dict, float]]) -> list[tuple[str, dict, float]]:
@@ -277,22 +299,32 @@ def build_rag_context(
         effective_k = min(cfg.top_k * 2, 20)
     else:
         effective_k = cfg.top_k
+
+    # Scale by collection size (when > 1000 chunks)
+    store = _get_store()
+    if intent.use_notes:
+        col_size = _cached_count(store, "obsidian_vault")
+        effective_k = _scale_k_by_size(effective_k, col_size)
+    elif intent.use_code and settings.repos.paths:
+        col_size = _cached_count(store, settings.repos.collection_name)
+        effective_k = _scale_k_by_size(effective_k, col_size)
+
     trace.effective_top_k = effective_k
 
     # Strategies 1-2: Notas Obsidian (vector search + keyword variant)
     if intent.use_notes:
         try:
-            collection = _get_collection()
+            store = _get_store()
 
             # 1. Primary search
-            primary = _search_chroma(collection, query, effective_k)
+            primary = _vector_search(store, query, effective_k, collection="obsidian_vault")
             trace.notes_retrieved += len(primary)
 
             # 2. Keyword variant
             keywords = _extract_keywords(query)
             secondary = []
             if keywords != query.lower().strip() and len(keywords) > 3:
-                secondary = _search_chroma(collection, keywords, effective_k)
+                secondary = _vector_search(store, keywords, effective_k, collection="obsidian_vault")
                 trace.notes_retrieved += len(secondary)
 
             # Deduplicate + filter navigation + threshold
@@ -319,14 +351,15 @@ def build_rag_context(
     # Strategy 3: Code repo search
     if intent.use_code and settings.repos.paths:
         try:
-            code_coll = _get_code_collection()
-            code_results = _search_chroma(code_coll, query, effective_k)
+            store = _get_store()
+            code_col_name = settings.repos.collection_name
+            code_results = _vector_search(store, query, effective_k, collection=code_col_name)
             trace.code_retrieved += len(code_results)
 
             # Keyword variant para código
             keywords = _extract_keywords(query)
             if keywords != query.lower().strip() and len(keywords) > 3:
-                code_kw = _search_chroma(code_coll, keywords, effective_k)
+                code_kw = _vector_search(store, keywords, effective_k, collection=code_col_name)
                 code_results = code_results + code_kw
                 trace.code_retrieved += len(code_kw)
 
@@ -373,7 +406,7 @@ def build_rag_context(
     # Graph-only mode (no code chunks needed)
     if intent.use_graph and not code_relevant and not intent.use_code:
         try:
-            from obsidian_rag.graph.cache import graph_cache
+            from obsidian_rag.pipeline.graph.cache import graph_cache
             from obsidian_rag.retrieval.graph_context import build_graph_context
 
             synthetic_chunks: list[tuple[str, dict, float]] = []

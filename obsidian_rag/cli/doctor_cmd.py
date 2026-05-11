@@ -85,7 +85,6 @@ def run_doctor() -> None:
     # 3. Dependencies
     print("─── Dependências ───")
     deps = {
-        "chromadb": "chromadb",
         "fastapi": "fastapi",
         "uvicorn": "uvicorn",
         "httpx": "httpx",
@@ -237,24 +236,22 @@ def run_doctor() -> None:
 
     print()
 
-    # 7. ChromaDB
-    print("─── ChromaDB ───")
+    # 7. Vector Store
+    print(f"─── Vector Store ({settings.store.backend}) ───")
     try:
-        from obsidian_rag.store.chroma import get_client, get_collection
-        client = get_client()
-        notes_col = get_collection(client, name="obsidian_vault")
-        notes_count = notes_col.count()
+        from obsidian_rag.store.base import create_store
+        store = create_store()
+        notes_count = store.count(collection="obsidian_vault")
         _ok(f"Notas: {notes_count} chunks (obsidian_vault)")
 
         if settings.repos.paths:
             try:
-                code_col = get_collection(client, name=settings.repos.collection_name)
-                code_count = code_col.count()
+                code_count = store.count(collection=settings.repos.collection_name)
                 _ok(f"Código: {code_count} chunks ({settings.repos.collection_name})")
             except Exception:
                 _warn("Coleção de código não existe (corre: rag sync -l)")
     except Exception as e:
-        _warn(f"ChromaDB: {e}")
+        _warn(f"Store: {e}")
 
     print()
 
@@ -292,6 +289,56 @@ def run_doctor() -> None:
     _ok(f"Workers efectivos: {settings.pipeline.max_workers}")
     _ok(f"Batch embeddings: {perf.embedding_batch_size}")
     _ok(f"Limites: CPU {perf.max_cpu_percent}% / RAM {perf.max_memory_percent}%")
+    print()
+
+    # 10. Scale metrics
+    print("─── Escala ───")
+    try:
+        from obsidian_rag.store.base import create_store as _cs
+        _s = _cs()
+        vault_n = _s.count(collection="obsidian_vault")
+        code_n = 0
+        try:
+            code_n = _s.count(collection=settings.repos.collection_name)
+        except Exception:
+            pass
+        total_chunks = vault_n + code_n
+        _ok(f"Chunks: {vault_n} vault + {code_n} code = {total_chunks} total")
+        if total_chunks > 50_000:
+            _warn("Mais de 50k chunks — considerar Qdrant server mode (ver docs)")
+    except Exception as e:
+        _warn(f"Contagem de chunks falhou: {e}")
+
+    # Manifest
+    manifest_path = data_dir / "manifest.db" if data_dir.exists() else None
+    if manifest_path and manifest_path.exists():
+        size_mb = manifest_path.stat().st_size / (1024 * 1024)
+        _ok(f"Manifest: {size_mb:.1f} MB ({manifest_path.name})")
+    else:
+        _warn("Manifest não encontrado (primeiro sync ainda não correu)")
+
+    # VRAM
+    try:
+        from obsidian_rag.pipeline.governor import _read_vram
+        used, total_vram, pct = _read_vram()
+        free_vram = total_vram - used if total_vram > 0 else 0
+        if total_vram > 0:
+            if free_vram > 2.0:
+                _ok(f"VRAM: {free_vram:.1f} GB livres / {total_vram:.1f} GB total ({pct:.0f}% em uso)")
+            else:
+                _warn(f"VRAM: {free_vram:.1f} GB livres / {total_vram:.1f} GB total ({pct:.0f}% em uso)")
+    except Exception:
+        pass  # No GPU or pynvml — skip silently (already reported in Resources section)
+
+    # Disk usage for data dir
+    if data_dir.exists():
+        import shutil
+        du = shutil.disk_usage(data_dir)
+        free_gb = du.free / (1024 ** 3)
+        total_gb = du.total / (1024 ** 3)
+        used_pct = ((du.total - du.free) / du.total) * 100 if du.total > 0 else 0
+        _ok(f"Disco (data): {free_gb:.1f} GB livres / {total_gb:.0f} GB total ({used_pct:.0f}% em uso)")
+
     print()
 
     # Summary

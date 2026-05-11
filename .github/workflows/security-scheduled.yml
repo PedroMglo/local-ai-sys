@@ -1,0 +1,151 @@
+name: Security — Scheduled
+
+on:
+  schedule:
+    # Segunda-feira às 03:23 UTC
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  source-security:
+    name: Source security scan
+    runs-on: ubuntu-latest
+
+    env:
+      TRIVY_VERSION: "0.70.0"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            trivy-${{ runner.os }}-
+
+      - name: Install Python security tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pre-commit pip-audit
+
+      - name: Run pre-commit security hooks
+        id: precommit
+        continue-on-error: true
+        run: pre-commit run --all-files --show-diff-on-failure
+
+      - name: Install project with dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Audit Python dependencies with pip-audit
+        id: pipaudit
+        continue-on-error: true
+        run: pip-audit --format=json --output=pip-audit-report.json
+
+      - name: Install Trivy CLI
+        run: .github/scripts/install-trivy.sh
+
+      - name: Trivy filesystem scan
+        id: trivyfs
+        continue-on-error: true
+        run: |
+          trivy fs \
+            --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --format table \
+            --output trivy-fs-report.txt \
+            --exit-code 1 \
+            .
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-source-security-reports
+          path: |
+            pip-audit-report.json
+            trivy-fs-report.txt
+          retention-days: 14
+
+      - name: Fail if any source security scan failed
+        if: >
+          steps.precommit.outcome == 'failure' ||
+          steps.pipaudit.outcome == 'failure' ||
+          steps.trivyfs.outcome == 'failure'
+        run: exit 1
+
+  container-security:
+    name: Container security scan
+    runs-on: ubuntu-latest
+
+    env:
+      TRIVY_VERSION: "0.70.0"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            trivy-${{ runner.os }}-
+
+      - name: Build Docker image
+        run: docker build -t obsidian-rag:scheduled .
+
+      - name: Install Trivy CLI
+        run: .github/scripts/install-trivy.sh
+
+      - name: Trivy image scan
+        id: trivyimage
+        continue-on-error: true
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --format table \
+            --output trivy-image-report.txt \
+            --exit-code 1 \
+            obsidian-rag:scheduled
+
+      - name: Upload container security report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-container-security-report
+          path: trivy-image-report.txt
+          retention-days: 14
+
+      - name: Fail if container security scan failed
+        if: steps.trivyimage.outcome == 'failure'
+        run: exit 1

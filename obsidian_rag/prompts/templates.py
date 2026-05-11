@@ -49,7 +49,7 @@ ROUTER_SYSTEM = (
     'Pergunta: "Resume as minhas notas sobre DNS no Obsidian."\n'
     "ROUTE: RAG_ONLY\n"
     "REASON: Refere-se a notas pessoais do utilizador.\n\n"
-    'Pergunta: "Que componentes do meu projeto dependem do ChromaDB?"\n'
+    'Pergunta: "Que componentes do meu projeto dependem do Qdrant?"\n'
     "ROUTE: RAG_AND_GRAPH\n"
     "REASON: Pergunta sobre dependências num projeto local.\n\n"
     'Pergunta: "Qual é a capital da Noruega?"\n'

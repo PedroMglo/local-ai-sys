@@ -1,15 +1,26 @@
 version: 2
+
 updates:
   # ── Python dependencies (pip) ───────────────────────────────────────────────
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+      day: "monday"
       time: "06:00"
       timezone: "Europe/Lisbon"
     open-pull-requests-limit: 10
+
+    # Evita atualizar logo para releases acabadas de sair.
+    # Não atrasa security updates.
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+
     groups:
-      # Bump all FastAPI-related packages together
+      # FastAPI/API stack
       fastapi:
         patterns:
           - "fastapi"
@@ -17,35 +28,94 @@ updates:
           - "httpx"
           - "slowapi"
           - "pydantic*"
-      # Bump all dev/testing tools together
+
+      python-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Dev/testing/type/lint tools
       dev-tools:
+        dependency-type: "development"
         patterns:
           - "pytest*"
           - "coverage"
           - "mypy"
           - "ruff"
-      # ChromaDB + NetworkX together (graph + vector store)
+          - "pre-commit"
+          - "bandit"
+          - "pip-audit"
+
+      # Vector store + graph/data layer
       data-layer:
         patterns:
-          - "chromadb"
           - "networkx"
 
-  # ── GitHub Actions ───────────────────────────────────────────────────────────
+      # Security-related Python tools
+      security-tools:
+        patterns:
+          - "semgrep"
+          - "bandit"
+          - "pip-audit"
+          - "safety"
+
+      # Mantém majors fora dos grupos genéricos; aparecem como PRs individuais.
+    # Isto é mais seguro porque major updates devem ser revistos com cuidado.
+
+  # ── pre-commit hooks ───────────────────────────────────────────────────────
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:20"
+      timezone: "Europe/Lisbon"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      pre-commit-hooks:
+        patterns:
+          - "*"
+
+  # ── GitHub Actions ─────────────────────────────────────────────────────────
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "06:00"
+      time: "06:40"
       timezone: "Europe/Lisbon"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
-  # ── Docker base images ──────────────────────────────────────────────────────
+  # ── Docker base images ─────────────────────────────────────────────────────
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "06:00"
+      time: "07:00"
       timezone: "Europe/Lisbon"
     open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+
+  # ── Docker Compose images, se usares imagens com tags no docker-compose.yml ─
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:20"
+      timezone: "Europe/Lisbon"
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7

@@ -1,0 +1,24 @@
+title = "Gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist geral do projeto"
+paths = [
+  '''.pre-commit-config.yaml''',
+  '''README.md''',
+  '''docs/.*''',
+  '''tests/.*''',
+  '''.*\.lock''',
+  '''package-lock\.json''',
+  '''poetry\.lock'''
+]
+
+regexes = [
+  '''example[_-]?key''',
+  '''dummy[_-]?secret''',
+  '''fake[_-]?token''',
+  '''changeme''',
+  '''your_api_key_here'''
+]

@@ -5,18 +5,34 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   docker-build:
     name: Docker build & sanity check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      IMAGE_NAME: obsidian-rag:ci
+      CONTAINER_NAME: rag-health-test
+      RAG_API_HOST: "0.0.0.0"
+      RAG_API_PORT: "8000"
+      HOST_PORT: "18484"
+      RAG_API_API_KEY: "ci-test-key"
+      TRIVY_VERSION: "0.70.0"
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -25,63 +41,109 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          tags: obsidian-rag:ci
+          tags: ${{ env.IMAGE_NAME }}
           push: false
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Validate docker compose config
-        run: docker compose config
+      - name: Validate Docker Compose config
+        run: |
+          if [ -f docker-compose.yml ] || [ -f compose.yml ]; then
+            docker compose config
+          else
+            echo "Sem docker-compose.yml/compose.yml. A ignorar validação compose."
+          fi
 
       - name: Verify package importable in container
         run: |
-          docker run --rm obsidian-rag:ci python -c "
+          docker run --rm "$IMAGE_NAME" python -c "
           import obsidian_rag
           print('obsidian_rag version:', obsidian_rag.__version__)
           "
 
       - name: CLI help works inside container
-        run: docker run --rm obsidian-rag:ci rag --help
+        run: docker run --rm "$IMAGE_NAME" rag --help
 
       - name: Check container user is non-root
         run: |
-          USER_ID=$(docker run --rm obsidian-rag:ci id -u)
+          USER_ID=$(docker run --rm "$IMAGE_NAME" id -u)
+
           if [ "$USER_ID" = "0" ]; then
             echo "ERROR: Container corre como root"
             exit 1
           fi
+
           echo "OK: Container corre como UID $USER_ID"
 
-      - name: Health endpoint responds (sem Ollama)
+      - name: Start API container
         run: |
-          # Arrancar container em background (api_key obrigatória com host=0.0.0.0)
-          CID=$(docker run -d --name rag-health-test \
-            -e RAG_API_HOST=0.0.0.0 \
-            -e RAG_API_PORT=8000 \
-            -e RAG_API_API_KEY=ci-test-key \
-            -p 18484:8000 \
-            obsidian-rag:ci)
+          docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
-          # Aguardar arranque (max 30s)
+          docker run -d --name "$CONTAINER_NAME" \
+            -e RAG_API_HOST="$RAG_API_HOST" \
+            -e RAG_API_PORT="$RAG_API_PORT" \
+            -e RAG_API_API_KEY="$RAG_API_API_KEY" \
+            -p "$HOST_PORT:$RAG_API_PORT" \
+            "$IMAGE_NAME"
+
+      - name: Wait for health endpoint
+        run: |
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:18484/health > /dev/null 2>&1; then
+            if curl -sf "http://127.0.0.1:${HOST_PORT}/health" > /dev/null; then
               echo "OK: /health respondeu após ${i}s"
-              break
+              exit 0
             fi
+
             if [ "$i" = "30" ]; then
               echo "ERROR: /health não respondeu em 30s"
-              docker logs "$CID"
-              docker stop "$CID" && docker rm "$CID"
+              docker logs "$CONTAINER_NAME" || true
               exit 1
             fi
+
             sleep 1
           done
 
-          # Validar resposta
-          RESP=$(curl -sf http://localhost:18484/health)
+      - name: Validate health response
+        run: |
+          RESP=$(curl -sf "http://127.0.0.1:${HOST_PORT}/health")
           echo "Response: $RESP"
           echo "$RESP" | grep -q '"status":"ok"'
 
-          # Cleanup
-          docker stop "$CID" && docker rm "$CID"
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            trivy-${{ runner.os }}-
+
+      - name: Install Trivy CLI
+        run: .github/scripts/install-trivy.sh
+
+      - name: Trivy image scan
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --format table \
+            --output trivy-image-ci.txt \
+            --exit-code 1 \
+            "$IMAGE_NAME"
+
+      - name: Upload Docker security report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-security-report
+          path: trivy-image-ci.txt
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs "$CONTAINER_NAME" || true
+
+      - name: Stop API container
+        if: always()
+        run: docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true

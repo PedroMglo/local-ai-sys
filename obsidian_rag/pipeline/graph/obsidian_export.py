@@ -473,7 +473,7 @@ def export_repo(
 
     Retorna dict com stats para o index.
     """
-    from obsidian_rag.graph.enrich import (
+    from obsidian_rag.pipeline.graph.enrich import (
         detect_cross_community_links,
         generate_community_mermaid,
         infer_repo_tags,

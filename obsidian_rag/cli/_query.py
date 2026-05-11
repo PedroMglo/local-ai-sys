@@ -15,10 +15,21 @@ def run_query(args: Namespace) -> None:
     query = " ".join(args.query)
     api_url = f"http://localhost:{settings.api.port}"
 
+    payload: dict = {"query": query, "top_k": args.top_k, "min_score": args.min_score}
+    endpoint = "/query"
+
+    repo = getattr(args, "repo", None)
+    vault = getattr(args, "vault", None)
+    if repo:
+        endpoint = "/query/code"
+        payload["repo"] = repo
+    if vault:
+        payload["vault"] = vault
+
     try:
         resp = httpx.post(
-            f"{api_url}/query",
-            json={"query": query, "top_k": args.top_k, "min_score": args.min_score},
+            f"{api_url}{endpoint}",
+            json=payload,
             timeout=30.0,
         )
         resp.raise_for_status()

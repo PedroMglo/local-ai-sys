@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from obsidian_rag.config import settings
-from obsidian_rag.graph.builder import _graphify_output_dir, get_graph_json_path, get_report_path
+from obsidian_rag.pipeline.graph.builder import _graphify_output_dir, get_graph_json_path, get_report_path
 
 
 def _require_networkx():

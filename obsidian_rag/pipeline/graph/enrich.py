@@ -60,7 +60,7 @@ def _call_ollama(prompt: str, model: str | None = None) -> str:
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=settings.performance.enrich_timeout) as resp:  # nosec B310  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             data = json.loads(resp.read())
             raw = data.get("response", "").strip()
             # deepseek-r1 wraps in <think>...</think> — strip it
@@ -110,6 +110,7 @@ def summarize_communities(
     links = graph_data.get("links", [])
 
     summaries: dict[str, str] = {}
+    pending: list[tuple[str, str]] = []  # (community_id, prompt)
 
     for cid, member_ids in communities.items():
         if len(member_ids) < 5:
@@ -170,10 +171,26 @@ def summarize_communities(
             top_edges=top_edges or "  (sem edges internas)",
         )
 
-        print(f"    [Enrich] Gerando sumário para Community-{cid}...")
-        summary = _call_ollama(prompt)
-        summaries[cid] = summary
-        cache[cid] = summary
+        pending.append((cid, prompt))
+
+    # Parallelize LLM calls — each is I/O-bound HTTP to Ollama
+    if pending:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        max_workers = min(3, len(pending))
+        print(f"    [Enrich] {len(pending)} comunidades para sumarizar ({max_workers} paralelas)...")
+
+        def _summarize(item: tuple[str, str]) -> tuple[str, str]:
+            cid, prompt = item
+            print(f"    [Enrich] Gerando sumário para Community-{cid}...")
+            return cid, _call_ollama(prompt)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_summarize, item): item for item in pending}
+            for future in as_completed(futures):
+                cid, summary = future.result()
+                summaries[cid] = summary
+                cache[cid] = summary
 
     _save_cache(cache_path, cache)
     return summaries
