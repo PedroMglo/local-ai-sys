@@ -1,7 +1,7 @@
 # PROJECT OVERVIEW — obsidian-rag
 
 > **Versão:** 0.5.0
-> **Última atualização:** 2026-05-10
+> **Última atualização:** 2026-05-11
 > **Linguagem:** Python ≥ 3.11
 > **Licença:** A confirmar
 
@@ -175,7 +175,7 @@ obsidian-rag/
 ├── Makefile                    # Atalhos: make install, init, up, serve, sync, test, etc.
 ├── install.sh                  # Instalador Linux/macOS: cria venv, instala deps, valida comandos
 ├── install.ps1                 # Instalador Windows (PowerShell): cria venv, instala deps, valida
-├── Dockerfile                  # Multi-stage build (python:3.11-slim), CMD ["rag", "serve"]
+├── Dockerfile                  # Multi-stage build (python:3.11-slim), apt-get upgrade + remoção de build tools no runtime, CMD ["rag", "serve"]
 ├── docker-compose.yml          # Serviço obsidian-rag + rede Ollama + Qdrant (profile)
 ├── docs/                       # Documentação técnica detalhada
 │   ├── PROJECT_OVERVIEW.md     # Este ficheiro
@@ -211,7 +211,9 @@ obsidian-rag/
 │   └── workflows/              # CI/CD GitHub Actions
 │       ├── ci.yml              # Lint + test matrix + CLI smoke + security audit
 │       ├── docker.yml          # Docker build + compose config
-│       └── release.yml         # Build wheel/sdist + GitHub Release
+│       ├── release.yml         # Build wheel/sdist + GitHub Release
+│       ├── release-gate.yml    # Docker build + Trivy image scan + OWASP ZAP baseline
+│       └── security-scheduled.yml # Scans semanais: source (Trivy fs, pip-audit) + container (Trivy image)
 ├── scripts/
 │   ├── monitor_rag.sh          # Monitor de recursos em tempo real (RAM, CPU, disco, GPU, processos RAG/Ollama)
 │   └── rag-cgroup.sh           # systemd-run wrapper: executa rag-sync --all com MemoryMax e CPUQuota
@@ -748,7 +750,7 @@ docker compose logs -f obsidian-rag
 docker compose down
 ```
 
-O `docker-compose.yml` monta `./data` como volume e configura `extra_hosts: host.docker.internal:host-gateway` para aceder ao Ollama do host. A imagem usa multi-stage build com `python:3.11-slim`. O `CMD` é `["rag", "serve"]`.
+O `docker-compose.yml` monta `./data` como volume e configura `extra_hosts: host.docker.internal:host-gateway` para aceder ao Ollama do host. A imagem usa multi-stage build com `python:3.11-slim`, com `apt-get upgrade` em ambos os stages (builder e runtime) para patches OS-level e remoção de `pip`, `setuptools` e `wheel` do runtime stage (ferramentas de build não necessárias em runtime que continham CVE-2026-23949 e CVE-2026-24049) — necessário para passar os scans Trivy nos workflows `release-gate.yml` e `security-scheduled.yml`. O `CMD` é `["rag", "serve"]`.
 
 **Qdrant (opcional):** O `docker-compose.yml` inclui um serviço `qdrant` (qdrant/qdrant:v1.13.2) nas portas 6333/6334, ativado via profile: `docker compose --profile qdrant up`. Para usar Qdrant como backend, configurar `[store] backend = "qdrant"` e `qdrant_url = "http://localhost:6333"` em `rag.toml`.
 
@@ -844,13 +846,15 @@ pytest tests/test_chunking_markdown.py
 pytest tests/test_api.py -v
 ```
 
-**CI/CD (GitHub Actions):** 3 workflows em `.github/workflows/`:
+**CI/CD (GitHub Actions):** 5 workflows em `.github/workflows/`:
 
-| Workflow      | Trigger        | Jobs                                                                                |
-| ------------- | -------------- | ----------------------------------------------------------------------------------- |
-| `ci.yml`      | push/PR → main | lint, test matrix (3 OS × 2 Python), CLI smoke (3 OS), config tests, security audit |
-| `docker.yml`  | push/PR → main | Docker build, compose config, sanity check                                          |
-| `release.yml` | tag `v*`       | CI → build wheel/sdist → GitHub Release → Docker image                              |
+| Workflow                 | Trigger                  | Jobs                                                                                |
+| ------------------------ | ------------------------ | ----------------------------------------------------------------------------------- |
+| `ci.yml`                 | push/PR → main           | lint, test matrix (3 OS × 2 Python), CLI smoke (3 OS), config tests, security audit |
+| `docker.yml`             | push/PR → main           | Docker build, compose config, sanity check                                          |
+| `release.yml`            | tag `v*`                 | CI → build wheel/sdist → GitHub Release → Docker image                              |
+| `release-gate.yml`       | PR → main, workflow_call | Docker build, non-root check, health endpoint, Trivy image scan, OWASP ZAP baseline |
+| `security-scheduled.yml` | cron (semanal)           | Source scan (pre-commit, pip-audit, Trivy fs), Container scan (Trivy image)         |
 
 **329 testes** (18 skipped) em 20 ficheiros, sem dependências externas (Ollama, ChromaDB):
 

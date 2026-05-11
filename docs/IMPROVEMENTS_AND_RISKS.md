@@ -317,6 +317,27 @@ Desde a Phase 1 (v0.5.0), `PipelineConfig.max_workers` é **efectivamente dead c
 
 **Resolução (v0.4.0 + v0.4.1):** `rag init` agora valida paths contra locações perigosas com lógica cross-platform: raízes de disco Windows (`C:\`), dirs de sistema Windows (`Program Files`, `ProgramData`), dirs macOS (`/System`, `/Library`, `~/Library`), dirs Linux (`/bin`, `/usr`, etc.) com resolução de symlinks via `os.path.realpath()`. Paths iCloud (macOS) e OneDrive (Windows) são detectados como candidatos válidos para vaults. Os paths em `builder.py` continuam sem validação runtime (risco baixo pois vêm de `rag.toml`).
 
+### 5.4b ~~Imagem Docker com vulnerabilidades (falha Trivy)~~ ✅ RESOLVIDO
+
+| Campo                  | Detalhe                                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| **Prioridade**         | ~~Alta~~ — Resolvido                                                                          |
+| **Impacto**            | Alto — bloqueava os workflows `release-gate.yml` e `security-scheduled.yml` no GitHub Actions |
+| **Complexidade**       | Baixa                                                                                         |
+| **Ficheiros afetados** | `Dockerfile`                                                                                  |
+
+**Causa raiz (2026-05-11):** Duas categorias de vulnerabilidades na imagem Docker:
+
+1. **Pacotes OS desatualizados:** A imagem base `python:3.11-slim` (Debian) contém pacotes com vulnerabilidades HIGH/CRITICAL.
+2. **Build tools Python no runtime:** Após copiar `site-packages` do builder stage, a imagem final continha `setuptools` e `wheel` — ferramentas de build desnecessárias em runtime que traziam vulnerabilidades vendored:
+   - **CVE-2026-23949** (HIGH): `jaraco.context 5.3.0` — path traversal, vendored dentro do `setuptools`
+   - **CVE-2026-24049** (HIGH): `wheel 0.45.1` — privilege escalation, presente como pacote standalone e vendored dentro do `setuptools`
+
+**Resolução (2026-05-11):**
+
+- **OS-level:** Adicionado `apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*` em **ambos os stages** do Dockerfile (builder e runtime). A limpeza de `/var/lib/apt/lists/*` mantém a imagem final pequena.
+- **Python-level:** Após copiar `site-packages` do builder, o runtime stage faz `pip install --no-cache-dir --upgrade setuptools wheel` (atualiza para versões sem CVEs) seguido de `pip uninstall -y pip setuptools wheel` (remove completamente as ferramentas de build do runtime). Isto elimina tanto as versões vulneráveis standalone como as vendored, reduzindo a superfície de ataque da imagem final.
+
 ### 5.5 ChromaDB telemetria desativada mas sem validação — ⏸️ DEFERRED
 
 | Campo                  | Detalhe                                               |
@@ -729,19 +750,20 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | 70  | ~~`docker.yml`: health endpoint test real (`/health` sem Ollama, api_key=ci-test-key)~~                  | Média        | ✅ Concluído |
 | 71  | ~~`config.py`: `_find_project_root()` com fallback CWD para funcionar em containers~~                    | Baixa        | ✅ Concluído |
 
-> **Fase 8 concluída em 2026-05-10.** Pipeline CI/CD completa com GitHub Actions: testes em matrix 3 OS × 2 Python (sem Ollama/GPU/rsync), CLI smoke test cross-platform, security audit (secrets, .env, .gitignore, Docker), Docker build + compose config + health endpoint test, release workflow com GitHub Release automático. Dockerfile com user não-root (UID 1000). `_find_project_root()` com fallback CWD para containers. `ci.yml` com `workflow_call` para reutilização em `release.yml`. `make ci` para validação local completa. Cobertura: 61%.
+> **Fase 8 concluída em 2026-05-10.** Pipeline CI/CD completa com GitHub Actions: testes em matrix 3 OS × 2 Python (sem Ollama/GPU/rsync), CLI smoke test cross-platform, security audit (secrets, .env, .gitignore, Docker), Docker build + compose config + health endpoint test, release workflow com GitHub Release automático. Dockerfile com user não-root (UID 1000). `_find_project_root()` com fallback CWD para containers. `ci.yml` com `workflow_call` para reutilização em `release.yml`. `make ci` para validação local completa. Cobertura: 61%. Posteriormente adicionados `release-gate.yml` (Trivy image scan + OWASP ZAP baseline) e `security-scheduled.yml` (scans semanais de source e container). Total: 5 workflows.
 
 ### Fase 9 — Security hardening (v0.4.1) ✅
 
-| #   | Tarefa                                                                                           | Complexidade | Estado       |
-| --- | ------------------------------------------------------------------------------------------------ | ------------ | ------------ |
-| 72  | ~~`SECURITY.md`: política de segurança profissional com modelo local-first, reporting, scope~~   | Média        | ✅ Concluído |
-| 73  | ~~`codeql.yml`: análise de segurança Python (path traversal, subprocess, credentials)~~          | Média        | ✅ Concluído |
-| 74  | ~~`dependabot.yml`: adicionar ecosystem `docker` para monitorizar `python:3.11-slim`~~           | Baixa        | ✅ Concluído |
-| 75  | ~~`Dockerfile`: `HEALTHCHECK` com Python stdlib (sem instalar curl)~~                            | Baixa        | ✅ Concluído |
-| 76  | ~~`docker-compose.yml`: bind `127.0.0.1`, api_key default `changeme`, comentários de segurança~~ | Baixa        | ✅ Concluído |
+| #   | Tarefa                                                                                                                      | Complexidade | Estado       |
+| --- | --------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ |
+| 72  | ~~`SECURITY.md`: política de segurança profissional com modelo local-first, reporting, scope~~                              | Média        | ✅ Concluído |
+| 73  | ~~`codeql.yml`: análise de segurança Python (path traversal, subprocess, credentials)~~                                     | Média        | ✅ Concluído |
+| 74  | ~~`dependabot.yml`: adicionar ecosystem `docker` para monitorizar `python:3.11-slim`~~                                      | Baixa        | ✅ Concluído |
+| 75  | ~~`Dockerfile`: `HEALTHCHECK` com Python stdlib (sem instalar curl)~~                                                       | Baixa        | ✅ Concluído |
+| 76  | ~~`docker-compose.yml`: bind `127.0.0.1`, api_key default `changeme`, comentários de segurança~~                            | Baixa        | ✅ Concluído |
+| 76b | ~~`Dockerfile`: `apt-get upgrade` + remoção de setuptools/wheel/pip do runtime (fix Trivy CVE-2026-23949, CVE-2026-24049)~~ | Baixa        | ✅ Concluído |
 
-> **Fase 9 concluída em 2026-05-10.** Security hardening: `SECURITY.md` com política de disclosure e modelo local-first, CodeQL para análise automática de segurança Python, Dependabot para imagens Docker, `HEALTHCHECK` no Dockerfile (Python stdlib), `docker-compose.yml` com bind local por defeito e api_key obrigatória.
+> **Fase 9 concluída em 2026-05-10, atualizada em 2026-05-11.** Security hardening: `SECURITY.md` com política de disclosure e modelo local-first, CodeQL para análise automática de segurança Python, Dependabot para imagens Docker, `HEALTHCHECK` no Dockerfile (Python stdlib), `docker-compose.yml` com bind local por defeito e api_key obrigatória. Dockerfile atualizado com `apt-get upgrade` em ambos os stages (builder e runtime) para patches OS-level, e remoção de `pip`, `setuptools` e `wheel` do runtime stage para eliminar CVE-2026-23949 (jaraco.context path traversal) e CVE-2026-24049 (wheel privilege escalation) — corrige falhas nos scans Trivy dos workflows `release-gate.yml` e `security-scheduled.yml`.
 
 ### Fase 12 — Rewrite do sync: sequencial + proteção real de recursos (v0.4.1) ✅
 

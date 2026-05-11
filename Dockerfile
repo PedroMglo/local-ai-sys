@@ -29,6 +29,10 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY obsidian_rag/ obsidian_rag/
 COPY rag.toml .
 
+# Remove build tools not needed at runtime (fixes Trivy CVE-2026-23949, CVE-2026-24049)
+RUN pip install --no-cache-dir --upgrade setuptools wheel \
+    && pip uninstall -y pip setuptools wheel
+
 # ChromaDB data volume — writable pelo user rag
 RUN mkdir -p /app/data && chown -R rag:rag /app
 VOLUME ["/app/data"]
