@@ -39,15 +39,15 @@ jobs:
       ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:stable
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           tags: ${{ env.IMAGE_NAME }}
@@ -102,7 +102,7 @@ jobs:
           echo "$RESP" | grep -q '"status":"ok"'
 
       - name: Cache Trivy DB
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/trivy
           key: trivy-${{ runner.os }}-${{ github.run_id }}
@@ -174,7 +174,7 @@ jobs:
 
       - name: Upload release gate reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-gate-security-reports
           path: |

@@ -30,7 +30,7 @@ jobs:
       TRIVY_VERSION: "0.70.0"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -111,7 +111,7 @@ jobs:
           echo "$RESP" | grep -q '"status":"ok"'
 
       - name: Cache Trivy DB
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/trivy
           key: trivy-${{ runner.os }}-${{ github.run_id }}
@@ -133,7 +133,7 @@ jobs:
 
       - name: Upload Docker security report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docker-security-report
           path: trivy-image-ci.txt
