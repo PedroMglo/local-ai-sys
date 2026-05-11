@@ -3,9 +3,8 @@
 Validates that multiple threads can read/write to the store
 simultaneously without deadlocks, data corruption, or errors.
 
-Set QDRANT_TEST_URL=http://localhost:6333 to run against a live server.
-Without it, tests run against embedded Qdrant (may have lock limitations).
-"""
+Requires a running Qdrant server. Set QDRANT_TEST_URL to override the URL.
+Default: http://localhost:6333 (start with 'make qdrant')."""
 
 from __future__ import annotations
 
@@ -20,7 +19,7 @@ import pytest
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_QDRANT_TEST_URL = os.environ.get("QDRANT_TEST_URL", "")
+_QDRANT_TEST_URL = os.environ.get("QDRANT_TEST_URL", "http://localhost:6333")
 _DIM = 1024
 
 
@@ -28,19 +27,20 @@ def _vec(seed: float = 0.1) -> list[float]:
     return [math.sin(seed * (i + 1)) for i in range(_DIM)]
 
 
-def _make_store(tmp_path):
+def _make_store():
     try:
         from obsidian_rag.store.qdrant_store import QdrantVectorStore
     except ImportError:
         pytest.skip("qdrant-client not installed")
-    if _QDRANT_TEST_URL:
+    try:
         return QdrantVectorStore(url=_QDRANT_TEST_URL)
-    return QdrantVectorStore(data_dir=tmp_path / "conc_qdrant")
+    except Exception as exc:
+        pytest.skip(f"Qdrant server not available at {_QDRANT_TEST_URL}: {exc}")
 
 
 @pytest.fixture
-def store(tmp_path):
-    return _make_store(tmp_path)
+def store():
+    return _make_store()
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +85,6 @@ class TestParallelQueries:
 
 class TestQueryDuringUpsert:
 
-    @pytest.mark.skipif(
-        not _QDRANT_TEST_URL,
-        reason="Embedded Qdrant has numpy race condition during concurrent reads/writes; requires live server",
-    )
     def test_reads_dont_block_during_writes(self, store):
         """A reader thread can query while a writer thread upserts."""
         col = "conc_rw"

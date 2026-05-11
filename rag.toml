@@ -5,7 +5,7 @@
 [paths]
 source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
 data_dir = "data/qdrant"        # relativo à raiz do projeto
-vault_dirs = ["~/Obsidian/Vault", "~/Obsidian/Work"]  # multi-vault (overrides vault_dir)
+vault_dirs = ["~/Obsidian/Vault"]  # multi-vault (overrides vault_dir)
 
 # =============================================================================
 # SYNC — como o Vault Obsidian é lido pelo pipeline
@@ -186,10 +186,7 @@ abort_swap_percent = 80
 # =============================================================================
 [store]
 backend = "qdrant"
-# URL do servidor Qdrant (vazio = modo embedded local). Exemplo: "http://localhost:6333"
-# Server mode recomendado para concorrência (múltiplos modelos/queries simultâneas)
-# Arrancar: docker compose --profile qdrant up -d  (ou: make qdrant)
-# Rollback para embedded: qdrant_url = ""
+# URL do servidor Qdrant — obrigatório. Arrancar: make qdrant
 qdrant_url = "http://localhost:6333"
 # API key para Qdrant Cloud (vazio = sem autenticação)
 qdrant_api_key = ""

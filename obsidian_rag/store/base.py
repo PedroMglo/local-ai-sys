@@ -123,7 +123,13 @@ def create_store(backend: str | None = None, **kwargs) -> VectorStore:
         from obsidian_rag.config import settings
         backend = settings.store.backend
         # Inject config values unless the caller already provided them
-        if "url" not in kwargs and settings.store.qdrant_url:
+        if "url" not in kwargs:
+            if not settings.store.qdrant_url:
+                raise RuntimeError(
+                    "qdrant_url is required in rag.toml [store] section. "
+                    "Start the Qdrant container with 'make qdrant' and set "
+                    "qdrant_url = \"http://localhost:6333\"."
+                )
             kwargs["url"] = settings.store.qdrant_url
         if "api_key" not in kwargs and settings.store.qdrant_api_key:
             kwargs["api_key"] = settings.store.qdrant_api_key

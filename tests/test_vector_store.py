@@ -1,7 +1,7 @@
 """Parametrized tests for the VectorStore protocol.
 
-Tests run against QdrantVectorStore in embedded mode by default.
-Set QDRANT_TEST_URL=http://localhost:6333 to run against a live server.
+Requires a running Qdrant server. Set QDRANT_TEST_URL to the server URL.
+Default: http://localhost:6333 (start with 'make qdrant').
 """
 
 from __future__ import annotations
@@ -17,25 +17,23 @@ from obsidian_rag.store.base import QueryResult, VectorStore
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_QDRANT_TEST_URL = os.environ.get("QDRANT_TEST_URL", "")
+_QDRANT_TEST_URL = os.environ.get("QDRANT_TEST_URL", "http://localhost:6333")
 
 
-def _make_qdrant(tmp_path):
+def _make_qdrant():
     try:
         from obsidian_rag.store.qdrant_store import QdrantVectorStore
     except ImportError:
         pytest.skip("qdrant-client not installed")
     try:
-        if _QDRANT_TEST_URL:
-            return QdrantVectorStore(url=_QDRANT_TEST_URL)
-        return QdrantVectorStore(data_dir=tmp_path / "qdrant_data")
-    except ImportError:
-        pytest.skip("qdrant-client not installed")
+        return QdrantVectorStore(url=_QDRANT_TEST_URL)
+    except Exception as exc:
+        pytest.skip(f"Qdrant server not available at {_QDRANT_TEST_URL}: {exc}")
 
 
 @pytest.fixture
-def store(tmp_path) -> VectorStore:
-    return _make_qdrant(tmp_path)
+def store() -> VectorStore:
+    return _make_qdrant()
 
 
 # ---------------------------------------------------------------------------
@@ -65,9 +63,9 @@ def _sample_batch(n: int = 5, prefix: str = "doc") -> tuple[list[str], list[list
 
 class TestProtocolCompliance:
 
-    def test_qdrant_implements_protocol(self, tmp_path):
+    def test_qdrant_implements_protocol(self):
         try:
-            store = _make_qdrant(tmp_path)
+            store = _make_qdrant()
         except pytest.skip.Exception:
             pytest.skip("qdrant-client not installed")
         assert isinstance(store, VectorStore)
@@ -217,13 +215,16 @@ class TestCollectionIsolation:
 
 class TestFactory:
 
-    def test_create_store_qdrant(self, tmp_path):
-        """create_store(backend='qdrant') returns QdrantVectorStore."""
+    def test_create_store_qdrant(self):
+        """create_store(backend='qdrant', url=...) returns QdrantVectorStore."""
         pytest.importorskip("qdrant_client", reason="qdrant-client not installed")
         from obsidian_rag.store.base import create_store
         from obsidian_rag.store.qdrant_store import QdrantVectorStore
 
-        store = create_store(backend="qdrant", data_dir=tmp_path / "factory_qdrant")
+        try:
+            store = create_store(backend="qdrant", url=_QDRANT_TEST_URL)
+        except Exception as exc:
+            pytest.skip(f"Qdrant server not available: {exc}")
         assert isinstance(store, QdrantVectorStore)
 
     def test_create_store_unknown_raises(self):

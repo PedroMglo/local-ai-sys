@@ -1,23 +1,13 @@
 """Qdrant implementation of the VectorStore protocol.
 
-Supports two modes:
-
-* **embedded** — ``qdrant-client`` in-process (no server needed).
-  Data persisted to ``data_dir/qdrant``.
-* **server** — connects to a Qdrant server at ``url`` (e.g. Docker).
-
-Both use 1024-dimensional cosine distance to match bge-m3 embeddings.
+Connects to a Qdrant server at ``url`` (e.g. Docker container).
+Uses 1024-dimensional cosine distance to match bge-m3 embeddings.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import shutil
-import tempfile
 import time
-from pathlib import Path
 
 from obsidian_rag.store.base import QueryResult
 
@@ -68,40 +58,28 @@ def _retry(fn, *, max_retries: int = _MAX_RETRIES, backoff: float = _RETRY_BACKO
 
 
 class QdrantVectorStore:
-    """VectorStore backed by Qdrant (embedded or server mode).
+    """VectorStore backed by a Qdrant server.
 
     Args:
-        url: Qdrant server URL (e.g. ``http://localhost:6333``).
-             If *None*, uses embedded mode with ``data_dir``.
-        data_dir: Directory for embedded Qdrant storage.
-                  Ignored when ``url`` is set.
+        url: Qdrant server URL (e.g. ``http://localhost:6333``). Required.
         api_key: Optional API key for Qdrant Cloud.
     """
 
     def __init__(
         self,
         *,
-        url: str | None = None,
-        data_dir: str | Path | None = None,
+        url: str,
         api_key: str | None = None,
     ) -> None:
+        if not url:
+            raise ValueError(
+                "QdrantVectorStore requires a server URL. "
+                "Start the Qdrant container with 'make qdrant' and set "
+                "qdrant_url in rag.toml."
+            )
         QdrantClient, self._models = _import_qdrant()
-
-        if url:
-            self._client = QdrantClient(url=url, api_key=api_key)
-            log.info("Qdrant: server mode → %s", url)
-            self._qdrant_path: Path | None = None
-        else:
-            if data_dir is None:
-                from obsidian_rag.config import settings
-                data_dir = settings.paths.data_dir
-            qdrant_path = Path(data_dir) / "qdrant"
-            qdrant_path.mkdir(parents=True, exist_ok=True)
-            _recover_meta_if_corrupt(qdrant_path)
-            self._client = QdrantClient(path=str(qdrant_path))
-            self._qdrant_path = qdrant_path
-            _backup_meta(qdrant_path)
-            log.info("Qdrant: embedded mode → %s", qdrant_path)
+        self._client = QdrantClient(url=url, api_key=api_key)
+        log.info("Qdrant: server mode → %s", url)
 
         self._ensured: set[str] = set()
 
@@ -339,89 +317,6 @@ class QdrantVectorStore:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_META_FILENAME = "meta.json"
-_META_BACKUP   = "meta.json.bak"
-
-
-def _is_meta_valid(qdrant_path: Path) -> bool:
-    """Return True if meta.json exists and contains valid JSON."""
-    meta = qdrant_path / _META_FILENAME
-    if not meta.exists() or meta.stat().st_size == 0:
-        return False
-    try:
-        with meta.open() as f:
-            json.load(f)
-        return True
-    except (json.JSONDecodeError, OSError):
-        return False
-
-
-def _backup_meta(qdrant_path: Path) -> None:
-    """Copy meta.json → meta.json.bak using an atomic rename."""
-    meta = qdrant_path / _META_FILENAME
-    backup = qdrant_path / _META_BACKUP
-    if not meta.exists() or meta.stat().st_size == 0:
-        return
-    try:
-        fd, tmp = tempfile.mkstemp(dir=qdrant_path, prefix=".meta_bak_")
-        try:
-            os.close(fd)
-            shutil.copy2(meta, tmp)
-            os.replace(tmp, backup)          # atomic on POSIX
-        except Exception:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
-    except Exception as exc:
-        log.warning("Qdrant: não foi possível actualizar o backup do meta.json: %s", exc)
-
-
-def _recover_meta_if_corrupt(qdrant_path: Path) -> None:
-    """If meta.json is missing/empty/corrupt, restore from backup or seed empty."""
-    if _is_meta_valid(qdrant_path):
-        return
-
-    meta   = qdrant_path / _META_FILENAME
-    backup = qdrant_path / _META_BACKUP
-
-    if backup.exists() and backup.stat().st_size > 0:
-        try:
-            with backup.open() as f:
-                json.load(f)                 # validate backup before using it
-            shutil.copy2(backup, meta)
-            log.warning(
-                "Qdrant: meta.json corrompido/vazio — restaurado de %s", backup
-            )
-            return
-        except (json.JSONDecodeError, OSError) as exc:
-            log.warning("Qdrant: backup também inválido (%s) — a criar meta.json vazio", exc)
-
-    # Last resort: seed an empty-but-valid meta so QdrantLocal doesn't crash.
-    # Collections will be re-created on first upsert via _ensure_collection().
-    try:
-        fd, tmp = tempfile.mkstemp(dir=qdrant_path, prefix=".meta_seed_")
-        try:
-            with os.fdopen(fd, "w") as f:
-                json.dump({"collections": {}, "aliases": {}}, f)
-            os.replace(tmp, meta)
-            log.warning(
-                "Qdrant: meta.json corrompido/vazio e sem backup válido — "
-                "reiniciado com colecções vazias. "
-                "Os dados SQLite existentes serão re-indexados no próximo sync."
-            )
-        except Exception:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
-    except Exception as exc:
-        log.error("Qdrant: não foi possível semear meta.json: %s", exc)
-
-
 def _str_to_uint(s: str) -> int:
     """Deterministic string → unsigned 64-bit int for Qdrant point IDs.
 

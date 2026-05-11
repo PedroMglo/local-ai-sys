@@ -177,7 +177,7 @@ _DEFAULT_EXCLUDE_PATTERNS = (
 @dataclass(frozen=True)
 class StoreConfig:
     backend: str             # "qdrant"
-    qdrant_url: str          # Qdrant server URL (empty = embedded mode)
+    qdrant_url: str          # Qdrant server URL — required (e.g. "http://localhost:6333")
     qdrant_api_key: str      # Qdrant Cloud API key (empty = none)
 
 
