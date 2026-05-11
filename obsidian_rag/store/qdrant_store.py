@@ -78,7 +78,7 @@ class QdrantVectorStore:
     # -- internal helpers --
 
     def _ensure_collection(self, name: str) -> None:
-        """Create collection if it doesn't exist yet."""
+        """Create collection if it doesn't exist yet (dense + sparse)."""
         if name in self._ensured:
             return
 
@@ -91,8 +91,31 @@ class QdrantVectorStore:
                     size=_VECTOR_DIM,
                     distance=models.Distance.COSINE,
                 ),
+                sparse_vectors_config={
+                    "bm25": models.SparseVectorParams(),
+                },
             )
-            log.info("Qdrant: created collection %r (%dd cosine)", name, _VECTOR_DIM)
+            log.info("Qdrant: created collection %r (%dd cosine + bm25 sparse)", name, _VECTOR_DIM)
+        else:
+            # Existing collection — ensure sparse index exists
+            try:
+                info = self._client.get_collection(name)
+                has_sparse = (
+                    info.config
+                    and info.config.params
+                    and getattr(info.config.params, "sparse_vectors", None)
+                    and "bm25" in info.config.params.sparse_vectors
+                )
+                if not has_sparse:
+                    self._client.update_collection(
+                        collection_name=name,
+                        sparse_vectors_config={
+                            "bm25": models.SparseVectorParams(),
+                        },
+                    )
+                    log.info("Qdrant: added bm25 sparse index to %r", name)
+            except Exception as exc:
+                log.debug("Qdrant: could not check/add sparse index to %r: %s", name, exc)
         self._ensured.add(name)
 
     # -- VectorStore protocol --
@@ -105,22 +128,35 @@ class QdrantVectorStore:
         metadatas: list[dict],
         *,
         collection: str = "obsidian_vault",
+        sparse_vectors: list[dict] | None = None,
     ) -> None:
         models = self._models
         self._ensure_collection(collection)
 
-        points = [
-            models.PointStruct(
-                id=_str_to_uint(rid),
-                vector=emb,
-                payload={
-                    "_id": rid,       # preserve original string ID
-                    "_document": doc,
-                    **meta,
-                },
+        points = []
+        for i, (rid, emb, doc, meta) in enumerate(zip(ids, embeddings, documents, metadatas)):
+            vector: dict | list = emb
+            if sparse_vectors and i < len(sparse_vectors):
+                sv = sparse_vectors[i]
+                if sv.get("indices"):
+                    vector = {
+                        "": emb,  # default (dense) vector
+                        "bm25": models.SparseVector(
+                            indices=sv["indices"],
+                            values=sv["values"],
+                        ),
+                    }
+            points.append(
+                models.PointStruct(
+                    id=_str_to_uint(rid),
+                    vector=vector,
+                    payload={
+                        "_id": rid,
+                        "_document": doc,
+                        **meta,
+                    },
+                )
             )
-            for rid, emb, doc, meta in zip(ids, embeddings, documents, metadatas)
-        ]
 
         # Qdrant recommends batches ≤ 100
         for i in range(0, len(points), 100):
@@ -195,6 +231,7 @@ class QdrantVectorStore:
         *,
         collection: str = "obsidian_vault",
         filters: dict | None = None,
+        sparse_query: dict | None = None,
     ) -> list[QueryResult]:
         self._ensure_collection(collection)
 
@@ -207,13 +244,39 @@ class QdrantVectorStore:
             ]
             query_filter = models.Filter(must=conditions)
 
-        response = self._client.query_points(
-            collection_name=collection,
-            query=embedding,
-            limit=n,
-            with_payload=True,
-            query_filter=query_filter,
-        )
+        # Hybrid search: dense prefetch + sparse, fused with RRF
+        if sparse_query and sparse_query.get("indices"):
+            response = self._client.query_points(
+                collection_name=collection,
+                prefetch=[
+                    models.Prefetch(
+                        query=embedding,
+                        using="",  # default dense vector
+                        limit=n * 2,
+                        filter=query_filter,
+                    ),
+                    models.Prefetch(
+                        query=models.SparseVector(
+                            indices=sparse_query["indices"],
+                            values=sparse_query["values"],
+                        ),
+                        using="bm25",
+                        limit=n * 2,
+                        filter=query_filter,
+                    ),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=n,
+                with_payload=True,
+            )
+        else:
+            response = self._client.query_points(
+                collection_name=collection,
+                query=embedding,
+                limit=n,
+                with_payload=True,
+                query_filter=query_filter,
+            )
         results = []
         for hit in response.points:
             payload = dict(hit.payload) if hit.payload else {}

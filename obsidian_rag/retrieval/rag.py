@@ -147,11 +147,55 @@ def _estimate_complexity(query: str) -> str:
     return "normal"
 
 
-def _search_chroma(store: VectorStore, query_text: str, n: int, *, collection: str = "obsidian_vault", filters: dict | None = None) -> list[tuple[str, dict, float]]:
-    """Vector search via the VectorStore protocol."""
+def _vector_search(store: VectorStore, query_text: str, n: int, *, collection: str = "obsidian_vault", filters: dict | None = None) -> list[tuple[str, dict, float]]:
+    """Hybrid search: dense embedding + BM25 sparse (when available)."""
     embedding = get_query_embedding(query_text)
-    results = store.query(embedding, n=min(n * 3, 50), collection=collection, filters=filters)
+
+    # Try BM25 sparse query
+    sparse_query = _get_sparse_query(query_text, collection)
+
+    results = store.query(
+        embedding,
+        n=min(n * 3, 50),
+        collection=collection,
+        filters=filters,
+        sparse_query=sparse_query,
+    )
     return [(r.document, r.metadata, r.score) for r in results]
+
+
+# === BM25 sparse query helper ===
+
+_bm25_cache: dict[str, object] = {}  # collection → BM25Vectorizer
+
+
+def _get_sparse_query(query_text: str, collection: str) -> dict | None:
+    """Load BM25 model and transform query to sparse vector. Returns None if unavailable."""
+    from obsidian_rag.retrieval.sparse import BM25Vectorizer, tokenize
+    from pathlib import Path
+
+    if collection not in _bm25_cache:
+        try:
+            model_path = Path(settings.paths.data_dir) / "bm25" / f"{collection}.json"
+            if model_path.exists():
+                _bm25_cache[collection] = BM25Vectorizer.load(model_path)
+                log.info("BM25: loaded model for %r (vocab=%d)", collection, _bm25_cache[collection].vocab_size)
+            else:
+                _bm25_cache[collection] = None
+        except Exception as exc:
+            log.debug("BM25: could not load model for %r: %s", collection, exc)
+            _bm25_cache[collection] = None
+
+    bm25 = _bm25_cache.get(collection)
+    if bm25 is None:
+        return None
+
+    tokens = tokenize(query_text)
+    tokens = [t for t in tokens if t not in _STOP_WORDS]
+    if not tokens:
+        return None
+
+    return bm25.transform(tokens)
 
 
 def _deduplicate(chunks: list[tuple[str, dict, float]]) -> list[tuple[str, dict, float]]:
@@ -289,14 +333,14 @@ def build_rag_context(
             store = _get_store()
 
             # 1. Primary search
-            primary = _search_chroma(store, query, effective_k, collection="obsidian_vault")
+            primary = _vector_search(store, query, effective_k, collection="obsidian_vault")
             trace.notes_retrieved += len(primary)
 
             # 2. Keyword variant
             keywords = _extract_keywords(query)
             secondary = []
             if keywords != query.lower().strip() and len(keywords) > 3:
-                secondary = _search_chroma(store, keywords, effective_k, collection="obsidian_vault")
+                secondary = _vector_search(store, keywords, effective_k, collection="obsidian_vault")
                 trace.notes_retrieved += len(secondary)
 
             # Deduplicate + filter navigation + threshold
@@ -325,13 +369,13 @@ def build_rag_context(
         try:
             store = _get_store()
             code_col_name = settings.repos.collection_name
-            code_results = _search_chroma(store, query, effective_k, collection=code_col_name)
+            code_results = _vector_search(store, query, effective_k, collection=code_col_name)
             trace.code_retrieved += len(code_results)
 
             # Keyword variant para código
             keywords = _extract_keywords(query)
             if keywords != query.lower().strip() and len(keywords) > 3:
-                code_kw = _search_chroma(store, keywords, effective_k, collection=code_col_name)
+                code_kw = _vector_search(store, keywords, effective_k, collection=code_col_name)
                 code_results = code_results + code_kw
                 trace.code_retrieved += len(code_kw)
 

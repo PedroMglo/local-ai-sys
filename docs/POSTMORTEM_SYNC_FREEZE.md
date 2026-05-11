@@ -6,6 +6,9 @@
 **Hardware:** Zorin OS 18.1, 32 GB RAM, 24 threads (i7), RTX 4060 Max-Q 8 GB VRAM
 **Estado:** ✅ RESOLVIDO — Bounded Ingest Pipeline (v0.5.0, 2026-05-10) + hotfixes adicionais (v0.5.1, 2026-05-11)
 
+> **Nota (2026-05-11):** Referências a ChromaDB neste documento são históricas.
+> O backend ChromaDB foi removido na v1.1 — o projecto usa exclusivamente Qdrant.
+
 ---
 
 ## 0. Estado de resolução
@@ -429,6 +432,7 @@ Após a implementação do bounded ingest pipeline (v0.5.0), a primeira execuç�
 **Sintoma:** Após `rag sync --all` completar com sucesso, a coleção `code_repos` ficava com 0 chunks em vez dos ~150 esperados.
 
 **Causa raiz:**
+
 ```python
 # Código com bug — chamado 5× (uma vez por repo)
 def _cleanup_stale(self, source: IngestSource) -> None:
@@ -442,6 +446,7 @@ def _cleanup_stale(self, source: IngestSource) -> None:
 Em cada iteração, `existing_in_store` continha todos os IDs da coleção (5 repos), enquanto `manifest_ids` continha apenas os IDs do repo atual. A diferença apagava os chunks de todos os outros repos. Após 5 iterações: coleção vazia.
 
 **Correcção:**
+
 ```python
 # Depois da correcção — chamado UMA VEZ após todos os repos
 def _cleanup_stale_global(self, all_manifest_ids: set[str]) -> None:
@@ -464,6 +469,7 @@ self._cleanup_stale_global(all_manifest_ids)
 **Sintoma:** Parse error silencioso para `PROJECT_OVERVIEW.md` com mensagem vazia (`Parse error for PROJECT_OVERVIEW.md: ''`). O ficheiro não era indexado.
 
 **Causa raiz:**
+
 ```python
 # Código com bug
 def _split_long_text(text, max_chars, overlap):
@@ -483,6 +489,7 @@ def _split_long_text(text, max_chars, overlap):
 Quando `rfind(". ")` encontrava um boundary próximo do início do segmento, `end - overlap` podia ser ≤ `start`. O cursor ficava preso e a lista de chunks crescia indefinidamente até `MemoryError` com `str(e) == ""`.
 
 **Correcção:**
+
 ```python
 next_start = end - overlap if end < len(text) else end
 start = next_start if next_start > start else end  # garante avanço
@@ -497,6 +504,7 @@ start = next_start if next_start > start else end  # garante avanço
 **Causa raiz:** `data/qdrant/qdrant/meta.json` ficou com 0 bytes após um processo ser morto no meio de uma escrita (SIGKILL durante graphify).
 
 **Correcção:**
+
 ```python
 def _recover_meta_if_corrupt(qdrant_path: str) -> None:
     meta = Path(qdrant_path) / "meta.json"
@@ -519,9 +527,9 @@ _backup_meta(qdrant_path)                      # APÓS init bem-sucedido
 
 ### 12.4 Ficheiros alterados (v0.5.1)
 
-| Ficheiro                             | Alteração                                                        | Impacto                              |
-| ------------------------------------ | ---------------------------------------------------------------- | ------------------------------------ |
-| `obsidian_rag/pipeline/ingest.py`    | `_cleanup_stale_global()` substitui lógica per-repo             | `code_repos` com 150 chunks (era 0)  |
-| `obsidian_rag/chunking/markdown.py`  | Guard de avanço em `_split_long_text()`                          | Sem loops infinitos em ficheiros longos |
-| `obsidian_rag/store/qdrant_store.py` | `_recover_meta_if_corrupt()` + `_backup_meta()` em `__init__`   | Startup robusto após kills abruptos  |
-| `obsidian_rag/pipeline/ingest.py`    | Logs `[scan]`/`[parse]`/`[embed]`/`[write]` + erros com traceback | Visibilidade em tempo real          |
+| Ficheiro                             | Alteração                                                         | Impacto                                 |
+| ------------------------------------ | ----------------------------------------------------------------- | --------------------------------------- |
+| `obsidian_rag/pipeline/ingest.py`    | `_cleanup_stale_global()` substitui lógica per-repo               | `code_repos` com 150 chunks (era 0)     |
+| `obsidian_rag/chunking/markdown.py`  | Guard de avanço em `_split_long_text()`                           | Sem loops infinitos em ficheiros longos |
+| `obsidian_rag/store/qdrant_store.py` | `_recover_meta_if_corrupt()` + `_backup_meta()` em `__init__`     | Startup robusto após kills abruptos     |
+| `obsidian_rag/pipeline/ingest.py`    | Logs `[scan]`/`[parse]`/`[embed]`/`[write]` + erros com traceback | Visibilidade em tempo real              |

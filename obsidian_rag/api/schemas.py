@@ -40,7 +40,7 @@ class QueryResponse(BaseModel):
 class StatsResponse(BaseModel):
     total_chunks: int
     collection_name: str
-    chroma_path: str
+    data_path: str
     # Coleções adicionais
     code_chunks: int = 0
     code_collection_name: str = ""

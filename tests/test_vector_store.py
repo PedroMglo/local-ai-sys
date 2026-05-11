@@ -1,7 +1,6 @@
 """Parametrized tests for the VectorStore protocol.
 
-Tests run against ChromaVectorStore (always) and QdrantVectorStore
-(only when qdrant-client is installed).
+Tests run against QdrantVectorStore (embedded mode).
 """
 
 from __future__ import annotations
@@ -9,16 +8,11 @@ from __future__ import annotations
 import pytest
 
 from obsidian_rag.store.base import QueryResult, VectorStore
-from obsidian_rag.store.chroma_store import ChromaVectorStore
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-def _make_chroma(tmp_path):
-    return ChromaVectorStore(data_dir=tmp_path / "chroma")
-
 
 def _make_qdrant(tmp_path):
     try:
@@ -31,16 +25,9 @@ def _make_qdrant(tmp_path):
         pytest.skip("qdrant-client not installed")
 
 
-@pytest.fixture(params=["chroma", "qdrant"], ids=["chroma", "qdrant"])
-def store(request, tmp_path) -> VectorStore:
-    if request.param == "chroma":
-        return _make_chroma(tmp_path)
-    return _make_qdrant(tmp_path)
-
-
 @pytest.fixture
-def chroma_store(tmp_path) -> ChromaVectorStore:
-    return _make_chroma(tmp_path)
+def store(tmp_path) -> VectorStore:
+    return _make_qdrant(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -69,10 +56,6 @@ def _sample_batch(n: int = 5, prefix: str = "doc") -> tuple[list[str], list[list
 # ---------------------------------------------------------------------------
 
 class TestProtocolCompliance:
-
-    def test_chroma_implements_protocol(self, tmp_path):
-        store = _make_chroma(tmp_path)
-        assert isinstance(store, VectorStore)
 
     def test_qdrant_implements_protocol(self, tmp_path):
         try:
@@ -221,45 +204,81 @@ class TestCollectionIsolation:
 
 
 # ---------------------------------------------------------------------------
-# ChromaVectorStore-specific (non-parametrized)
-# ---------------------------------------------------------------------------
-
-class TestChromaSpecific:
-
-    def test_create_with_data_dir(self, tmp_path):
-        store = ChromaVectorStore(data_dir=tmp_path / "specific_chroma")
-        assert store.count(collection="test") == 0
-
-    def test_score_is_cosine_similarity(self, chroma_store):
-        """ChromaDB cosine distance is converted to similarity (1 - dist)."""
-        ids = ["cos-0"]
-        embs = [_vec(0.5)]
-        docs = ["cosine test"]
-        metas = [{"type": "test"}]
-        chroma_store.upsert_batch(ids, embs, docs, metas, collection="test_cos")
-
-        results = chroma_store.query(_vec(0.5), n=1, collection="test_cos")
-        assert len(results) == 1
-        # Self-query should have score very close to 1.0
-        assert results[0].score > 0.99
-
-
-# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
 class TestFactory:
 
-    def test_create_store_chroma(self, tmp_path, monkeypatch):
-        """create_store(backend='chroma') returns ChromaVectorStore."""
-        # Monkeypatch settings to avoid needing rag.toml
-        import obsidian_rag.store.base as base_mod
+    def test_create_store_qdrant(self, tmp_path):
+        """create_store(backend='qdrant') returns QdrantVectorStore."""
         from obsidian_rag.store.base import create_store
+        from obsidian_rag.store.qdrant_store import QdrantVectorStore
 
-        store = create_store(backend="chroma", data_dir=tmp_path / "factory_chroma")
-        assert isinstance(store, ChromaVectorStore)
+        store = create_store(backend="qdrant", data_dir=tmp_path / "factory_qdrant")
+        assert isinstance(store, QdrantVectorStore)
 
     def test_create_store_unknown_raises(self):
         from obsidian_rag.store.base import create_store
         with pytest.raises(ValueError, match="Unknown vector store"):
             create_store(backend="nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# Hybrid search (dense + BM25 sparse)
+# ---------------------------------------------------------------------------
+
+class TestHybridSearch:
+
+    def test_upsert_with_sparse_vectors(self, store):
+        """upsert_batch accepts sparse_vectors without error."""
+        ids, embs, docs, metas = _sample_batch(3, "sparse")
+        sparse = [
+            {"indices": [0, 5, 10], "values": [1.2, 0.8, 0.5]},
+            {"indices": [1, 5], "values": [1.0, 0.6]},
+            {"indices": [0, 3, 10], "values": [0.9, 1.1, 0.3]},
+        ]
+        store.upsert_batch(ids, embs, docs, metas, collection="test_sparse", sparse_vectors=sparse)
+        assert store.count(collection="test_sparse") == 3
+
+    def test_upsert_sparse_none_works(self, store):
+        """sparse_vectors=None falls back to dense-only (backward compat)."""
+        ids, embs, docs, metas = _sample_batch(2, "nosparse")
+        store.upsert_batch(ids, embs, docs, metas, collection="test_nosparse", sparse_vectors=None)
+        assert store.count(collection="test_nosparse") == 2
+
+    def test_query_with_sparse_returns_results(self, store):
+        """Hybrid query (dense + sparse) returns results."""
+        ids, embs, docs, metas = _sample_batch(5, "hybrid")
+        sparse = [
+            {"indices": [0, 1], "values": [1.0, 0.5]},
+            {"indices": [1, 2], "values": [0.8, 1.2]},
+            {"indices": [0, 2], "values": [0.6, 0.9]},
+            {"indices": [0], "values": [1.5]},
+            {"indices": [1], "values": [0.7]},
+        ]
+        store.upsert_batch(ids, embs, docs, metas, collection="test_hybrid", sparse_vectors=sparse)
+        results = store.query(
+            _vec(0.1),
+            n=3,
+            collection="test_hybrid",
+            sparse_query={"indices": [0, 1], "values": [1.0, 0.5]},
+        )
+        assert len(results) > 0
+        assert all(isinstance(r, QueryResult) for r in results)
+
+    def test_query_sparse_none_dense_only(self, store):
+        """sparse_query=None falls back to dense-only query."""
+        ids, embs, docs, metas = _sample_batch(3, "denseonly")
+        store.upsert_batch(ids, embs, docs, metas, collection="test_denseonly")
+        results = store.query(_vec(0.1), n=3, collection="test_denseonly", sparse_query=None)
+        assert len(results) > 0
+
+    def test_query_sparse_empty_dense_only(self, store):
+        """sparse_query with empty indices falls back to dense-only."""
+        ids, embs, docs, metas = _sample_batch(3, "emptysp")
+        store.upsert_batch(ids, embs, docs, metas, collection="test_emptysp")
+        results = store.query(
+            _vec(0.1), n=3, collection="test_emptysp",
+            sparse_query={"indices": [], "values": []},
+        )
+        assert len(results) > 0

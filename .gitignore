@@ -33,7 +33,7 @@ htmlcov/
 .pyright/
 
 # --- Runtime / Generated data ---
-# ChromaDB vector database (generated at runtime by the pipeline)
+# Vector store data (generated at runtime by the pipeline)
 data/
 
 # Graphify output (generated at runtime)

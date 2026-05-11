@@ -52,7 +52,7 @@ class TestAuthMiddleware:
             from obsidian_rag.api.app import app
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.get("/stats")
-            # May fail for other reasons (ChromaDB not available) but NOT 401
+            # May fail for other reasons (Qdrant not available) but NOT 401
             assert resp.status_code != 401
 
     def test_401_when_key_configured_no_header(self):
@@ -77,7 +77,7 @@ class TestAuthMiddleware:
             from obsidian_rag.api.app import app
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.get("/stats", headers={"Authorization": "Bearer correct-key"})
-            # Should not be 401 (may be 500 if ChromaDB not available, that's fine)
+            # Should not be 401 (may be 500 if Qdrant not available, that's fine)
             assert resp.status_code != 401
 
     def test_401_missing_bearer_prefix(self):

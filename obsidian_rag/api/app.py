@@ -70,7 +70,7 @@ def _check_api_key(request: Request) -> JSONResponse | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Preload ChromaDB collections + create connection pool."""
+    """Preload Qdrant collections + create connection pool."""
     global _http_pool
     setup_logging()
     _get_store()   # warm up the VectorStore singleton
@@ -146,7 +146,7 @@ def stats():
     return StatsResponse(
         total_chunks=store.count(collection="obsidian_vault"),
         collection_name="obsidian_vault",
-        chroma_path=str(settings.paths.data_dir),
+        data_path=str(settings.paths.data_dir),
         code_chunks=code_chunks,
         code_collection_name=code_name,
     )
@@ -176,14 +176,6 @@ def _query_store(store, collection_name: str, req: QueryRequest, *, filters: dic
 def _count_repo_chunks(store, repo_name: str) -> int:
     """Count code chunks belonging to a specific repo (best-effort)."""
     col_name = settings.repos.collection_name
-    try:
-        from obsidian_rag.store.chroma_store import ChromaVectorStore
-        if isinstance(store, ChromaVectorStore):
-            col = store._col(col_name)
-            result = col.get(where={"repo_name": {"$eq": repo_name}}, include=[])  # type: ignore[dict-item]
-            return len(result["ids"]) if result["ids"] else 0
-    except ImportError:
-        pass
     try:
         from obsidian_rag.store.qdrant_store import QdrantVectorStore
         if isinstance(store, QdrantVectorStore):

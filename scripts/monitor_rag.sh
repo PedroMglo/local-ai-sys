@@ -34,7 +34,7 @@ while true; do
 
     # Processos relevantes
     echo "── Processos RAG/Ollama/Graphify ──"
-    ps aux | grep -E '(rag.sync|ollama|graphify|embed|chroma)' | grep -v grep || echo "  (nenhum activo)"
+    ps aux | grep -E '(rag.sync|ollama|graphify|embed|qdrant)' | grep -v grep || echo "  (nenhum activo)"
     echo ""
 
     # GPU (se disponível)

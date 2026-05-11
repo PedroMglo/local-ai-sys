@@ -1,9 +1,10 @@
 """``rag migrate`` — migrate vectors between store backends.
 
 Usage:
-    rag migrate --from chroma --to qdrant
-    rag migrate --from qdrant --to chroma
-    rag migrate --from chroma --to qdrant --collections obsidian_vault,code_repos
+    rag migrate --from qdrant --to qdrant --collections obsidian_vault,code_repos
+
+Note: ChromaDB backend was removed. This command now supports
+re-embedding from a Qdrant source to a new Qdrant instance.
 """
 
 from __future__ import annotations
@@ -44,8 +45,7 @@ def _migrate_collection(
     if verbose:
         print(f"  [{collection}] {total} vectores a migrar...")
 
-    # We need the full data: for Chroma, we can get it via the raw client.
-    # For a general approach, we re-embed from the stored documents.
+    # We need the full data: re-embed from the stored documents.
     # Strategy: pull documents + metadata from source, re-embed, upsert to dest.
 
     migrated = 0
@@ -93,20 +93,29 @@ def _get_docs_from_source(
 ) -> tuple[list[str], list[dict]]:
     """Extract documents and metadata from source store.
 
-    For ChromaVectorStore, we can use the raw Chroma client.
-    For others, we use a dummy query approach.
+    Uses the Qdrant scroll/retrieve API to fetch stored documents by ID.
     """
-    from obsidian_rag.store.chroma_store import ChromaVectorStore
+    from obsidian_rag.store.qdrant_store import QdrantVectorStore
 
-    if isinstance(src, ChromaVectorStore):
-        col = src._col(collection)
-        result = col.get(ids=ids, include=["documents", "metadatas"])
-        docs = result.get("documents", []) or []
-        metas = result.get("metadatas", []) or []
-        return docs, [dict(m) for m in metas]
+    if isinstance(src, QdrantVectorStore):
+        try:
+            points = src._client.retrieve(
+                collection_name=collection,
+                ids=ids,
+                with_payload=True,
+                with_vectors=False,
+            )
+            docs = []
+            metas = []
+            for pt in points:
+                payload = dict(pt.payload) if pt.payload else {}
+                docs.append(payload.pop("_document", ""))
+                payload.pop("_id", None)
+                metas.append(payload)
+            return docs, metas
+        except Exception:
+            pass
 
-    # For Qdrant or future backends — re-query by ID would be needed
-    # For now, return empty (migration from Qdrant is less common)
     return [], []
 
 
@@ -141,9 +150,9 @@ def run_migrate(args: argparse.Namespace) -> None:
 def add_migrate_parser(subparsers) -> None:
     """Register the 'migrate' subcommand."""
     p = subparsers.add_parser("migrate", help="Migrar vectores entre backends")
-    p.add_argument("--from", dest="source", required=True, choices=["chroma", "qdrant"],
+    p.add_argument("--from", dest="source", required=True, choices=["qdrant"],
                    help="Backend de origem")
-    p.add_argument("--to", dest="dest", required=True, choices=["chroma", "qdrant"],
+    p.add_argument("--to", dest="dest", required=True, choices=["qdrant"],
                    help="Backend de destino")
     p.add_argument("--collections", default="obsidian_vault,code_repos",
                    help="Coleções a migrar (separadas por vírgula)")

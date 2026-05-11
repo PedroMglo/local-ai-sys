@@ -19,8 +19,6 @@ exclude: |
     \.cache/|
     data/|
     models/|
-    chroma/|
-    chromadb/|
     qdrant_storage/|
     storage/|
     embeddings/|

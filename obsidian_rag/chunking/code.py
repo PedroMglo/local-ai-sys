@@ -394,7 +394,7 @@ def _should_skip(path: Path, repo_dir: Path) -> bool:
 def chunk_repo(repo_dir: Path | str, cfg=None) -> list[Chunk]:
     """Processa todos os ficheiros relevantes de um repo git.
 
-    Retorna lista de Chunks compatível com sync_to_chroma().
+    Retorna lista de Chunks compatível com o pipeline de ingestão.
     """
     from obsidian_rag.config import settings as _settings
     if cfg is None:

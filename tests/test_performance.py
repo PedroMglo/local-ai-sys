@@ -20,7 +20,7 @@ class TestPerformanceConfigDefaults:
         toml_content = b"""
 [paths]
 source_dir = "source"
-data_dir = "data/chroma"
+data_dir = "data/qdrant"
 vault_dir = "/tmp/vault"
 
 [ollama]
@@ -55,7 +55,7 @@ embedding_model = "bge-m3"
         toml_content = b"""
 [paths]
 source_dir = "source"
-data_dir = "data/chroma"
+data_dir = "data/qdrant"
 vault_dir = "/tmp/vault"
 
 [ollama]
@@ -270,7 +270,7 @@ class TestWorkersCapping:
         toml_content = b"""
 [paths]
 source_dir = "source"
-data_dir = "data/chroma"
+data_dir = "data/qdrant"
 vault_dir = "/tmp/vault"
 
 [ollama]

@@ -8,7 +8,7 @@ Usage:
     rag serve             Iniciar API REST
     rag query "texto"     Pesquisa semântica
     rag chat              Chat interactivo com RAG
-    rag backup            Backup do ChromaDB
+    rag backup            Backup do Qdrant
     rag graph build       Construir knowledge graphs
     rag graph status      Estado dos grafos
 """
@@ -71,7 +71,7 @@ def main() -> None:
     )
 
     # --- rag backup ---
-    p_backup = sub.add_parser("backup", help="Backup do ChromaDB")
+    p_backup = sub.add_parser("backup", help="Backup do Qdrant")
     p_backup.add_argument("dest", nargs="?", default=None, help="Directório de destino")
 
     # --- rag graph ---

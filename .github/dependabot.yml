@@ -51,7 +51,6 @@ updates:
       # Vector store + graph/data layer
       data-layer:
         patterns:
-          - "chromadb"
           - "networkx"
 
       # Security-related Python tools

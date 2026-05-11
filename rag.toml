@@ -181,7 +181,6 @@ abort_swap_percent = 80
 # =============================================================================
 # VECTOR STORE — backend de armazenamento vectorial
 # Backends disponíveis:
-#   chroma — ChromaDB PersistentClient (default, sem server externo)
 #   qdrant — Qdrant (embedded sem server, ou server via qdrant_url)
 # RAG_STORE_* env vars sobrepõem estes valores
 # =============================================================================

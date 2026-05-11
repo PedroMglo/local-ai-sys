@@ -1,7 +1,7 @@
-"""Integration tests — API endpoints with ChromaDB in-memory.
+"""Integration tests — API endpoints with QdrantVectorStore in-memory.
 
 Tests the actual /query, /query/code, /stats endpoints using
-a real ChromaDB in-memory instance, bypassing Ollama by mocking
+a real Qdrant in-memory instance, bypassing Ollama by mocking
 embeddings.
 """
 
@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
 
-import chromadb
 import pytest
 from fastapi.testclient import TestClient
 
@@ -30,29 +29,30 @@ def _fake_embedding(seed: int = 0) -> list[float]:
     return (vec * (_EMBED_DIM // len(vec) + 1))[:_EMBED_DIM]
 
 
-def _make_chroma_collection(client: chromadb.ClientAPI, name: str, docs: list[dict]):
-    """Create an in-memory collection and populate with test docs."""
-    col = client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
+def _make_qdrant_store(tmp_path):
+    """Create an in-memory QdrantVectorStore."""
+    from obsidian_rag.store.qdrant_store import QdrantVectorStore
+    return QdrantVectorStore(data_dir=tmp_path / "qdrant_test")
+
+
+def _populate_store(store, collection: str, docs: list[dict]):
+    """Populate a QdrantVectorStore collection with test docs."""
     if docs:
-        col.add(
+        store.upsert_batch(
             ids=[d["id"] for d in docs],
             embeddings=[d["embedding"] for d in docs],
             documents=[d["text"] for d in docs],
             metadatas=[d.get("metadata", {}) for d in docs],
+            collection=collection,
         )
-    return col
 
 
 @pytest.fixture()
-def chroma_client():
-    """In-memory ChromaDB client."""
-    return chromadb.Client()
+def integration_client(tmp_path):
+    """TestClient with QdrantVectorStore in-memory collections injected."""
+    store = _make_qdrant_store(tmp_path)
 
-
-@pytest.fixture()
-def notes_collection(chroma_client):
-    """Populated obsidian_vault collection."""
-    docs = [
+    notes_docs = [
         {
             "id": "note-1",
             "text": "Como configurar aliases no zsh para terminal Linux",
@@ -78,13 +78,8 @@ def notes_collection(chroma_client):
             },
         },
     ]
-    return _make_chroma_collection(chroma_client, "obsidian_vault", docs)
 
-
-@pytest.fixture()
-def code_collection(chroma_client):
-    """Populated code_repos collection."""
-    docs = [
+    code_docs = [
         {
             "id": "code-1",
             "text": "def sync_repos():\n    '''Sync all configured repos.'''",
@@ -114,18 +109,11 @@ def code_collection(chroma_client):
             },
         },
     ]
-    return _make_chroma_collection(chroma_client, "code_repos", docs)
 
-
-@pytest.fixture()
-def integration_client(chroma_client, notes_collection, code_collection):
-    """TestClient with ChromaDB in-memory collections injected via VectorStore."""
-    from obsidian_rag.store.chroma_store import ChromaVectorStore
+    _populate_store(store, "obsidian_vault", notes_docs)
+    _populate_store(store, "code_repos", code_docs)
 
     fake_query_embed = _fake_embedding(1)  # will match note-1 closely
-
-    # Build a ChromaVectorStore backed by the in-memory client
-    store = ChromaVectorStore(client=chroma_client)
 
     with (
         patch("obsidian_rag.api.app._get_store", return_value=store),
@@ -138,8 +126,8 @@ def integration_client(chroma_client, notes_collection, code_collection):
         mock_settings.api.query_top_k = 10
         mock_settings.repos.paths = ["/fake/repo"]
         mock_settings.repos.collection_name = "code_repos"
-        mock_settings.paths.data_dir = "/tmp/test-chroma"
-        mock_settings.store.backend = "chroma"
+        mock_settings.paths.data_dir = str(tmp_path / "qdrant_test")
+        mock_settings.store.backend = "qdrant"
 
         from obsidian_rag.api.app import app
         yield TestClient(app, raise_server_exceptions=False)

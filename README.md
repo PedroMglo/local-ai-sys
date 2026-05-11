@@ -34,9 +34,9 @@ rag up
 
 | Problema                                                     | Solução                                                 |
 | ------------------------------------------------------------ | ------------------------------------------------------- |
-| Notas Obsidian e código Git isolados, sem pesquisa semântica | Indexa tudo em ChromaDB com embeddings `bge-m3`         |
+| Notas Obsidian e código Git isolados, sem pesquisa semântica | Indexa tudo em Qdrant com embeddings `bge-m3`           |
 | LLMs genéricos não conhecem os teus projectos e notas        | Proxy RAG injeta contexto local relevante em cada query |
-| Soluções cloud enviam dados para fora                        | 100% local — Ollama + ChromaDB + FastAPI                |
+| Soluções cloud enviam dados para fora                        | 100% local — Ollama + Qdrant + FastAPI                  |
 
 ---
 
@@ -73,7 +73,7 @@ rag doctor
 | `rag query -n 10 "texto"` | Pesquisa com N resultados                                  |
 | `rag chat`                | REPL interativo com RAG                                    |
 | `rag chat --debug`        | Chat com info de routing                                   |
-| `rag backup`              | Backup timestamped do ChromaDB                             |
+| `rag backup`              | Backup timestamped do Qdrant                               |
 | `rag schedule install`    | Instalar sync automático diário (systemd/launchd/schtasks) |
 | `rag schedule remove`     | Remover sync automático                                    |
 | `rag schedule status`     | Estado do agendamento                                      |
@@ -92,7 +92,7 @@ O `rag init` cria a configuração interactivamente. Para editar manualmente:
 ```toml
 [paths]
 source_dir = "source"           # staging dir (usado quando sync.backend ≠ direct)
-data_dir   = "data/chroma"      # ChromaDB persistente
+data_dir   = "data/qdrant"      # Qdrant persistente
 vault_dir  = "~/Obsidian/Vault" # caminho do teu Vault (fonte primária)
 
 [ollama]
@@ -223,7 +223,7 @@ O Ollama deve correr no host. O container acede-lhe via `host.docker.internal:11
 - **Validação de input:** Pydantic com limites em todos os endpoints
 - **Paths seguros:** `rag init` recusa indexar `/`, `~`, `.ssh`, `.gnupg` e dirs de sistema (cross-platform)
 - **Exclusões automáticas:** `.git`, `.venv`, `node_modules`, `__pycache__`, `.obsidian`, `.DS_Store`, binários
-- **Sem telemetria:** ChromaDB com `anonymized_telemetry=False`
+- **Sem telemetria:** Qdrant opera localmente sem telemetria externa
 - **Sem dados externos:** todo o processamento é local (Ollama + AST stdlib)
 
 ---
@@ -234,7 +234,7 @@ O Ollama deve correr no host. O container acede-lhe via `host.docker.internal:11
 rag doctor
 ```
 
-Verifica: Python, virtualenv, dependências, `rag.toml`, paths, Ollama, modelos, ChromaDB, permissões, Graphify.
+Verifica: Python, virtualenv, dependências, `rag.toml`, paths, Ollama, modelos, Qdrant, permissões, Graphify.
 
 ---
 
@@ -341,7 +341,7 @@ Git Repos ──────────────► Chunking (AST Python) �
                                │
                                ▼
                     ┌─────────────────────┐
-                    │      ChromaDB       │  (persistente em data/chroma/)
+                    │       Qdrant        │  (persistente em data/qdrant/)
                     ├─────────────────────┤
                     │ obsidian_vault      │ ← notas
                     │ code_repos          │ ← código
@@ -361,7 +361,7 @@ Git Repos ──────────────► Chunking (AST Python) �
 | Componente      | Tecnologia                                                             |
 | --------------- | ---------------------------------------------------------------------- |
 | Embeddings      | Ollama `bge-m3` (multilíngue, 1024d, local)                            |
-| Vector Store    | ChromaDB persistente (cosine similarity)                               |
+| Vector Store    | Qdrant persistente (cosine similarity)                                 |
 | Vault Sync      | direct (leitura in-place) / python (incremental) / rsync (Linux/macOS) |
 | Code Chunking   | `ast.parse()` stdlib — zero dependências externas                      |
 | Knowledge Graph | Graphify com backend Ollama (opt-in)                                   |

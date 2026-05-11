@@ -113,7 +113,7 @@ class RepoChunkingConfig:
 @dataclass(frozen=True)
 class ReposConfig:
     paths: tuple[Path, ...]   # repos git a indexar
-    collection_name: str      # coleção ChromaDB separada
+    collection_name: str      # coleção Qdrant separada
     chunking: RepoChunkingConfig
 
 
@@ -175,7 +175,7 @@ _DEFAULT_EXCLUDE_PATTERNS = (
 
 @dataclass(frozen=True)
 class StoreConfig:
-    backend: str             # "chroma" | "qdrant"
+    backend: str             # "qdrant"
     qdrant_url: str          # Qdrant server URL (empty = embedded mode)
     qdrant_api_key: str      # Qdrant Cloud API key (empty = none)
 
@@ -239,7 +239,7 @@ def load_settings() -> Settings:
     p = raw.get("paths", {})
     paths = PathsConfig(
         source_dir=_resolve_path(_env_override("paths", "source_dir", p.get("source_dir", "source"))),
-        data_dir=_resolve_path(_env_override("paths", "data_dir", p.get("data_dir", "data/chroma"))),
+        data_dir=_resolve_path(_env_override("paths", "data_dir", p.get("data_dir", "data/qdrant"))),
         vault_dir=_resolve_path(_env_override("paths", "vault_dir", p.get("vault_dir", "~/Obsidian/Vault"))),
     )
 
@@ -343,7 +343,7 @@ def load_settings() -> Settings:
 
     st = raw.get("store", {})
     store = StoreConfig(
-        backend=_env_override("store", "backend", st.get("backend", "chroma")),
+        backend=_env_override("store", "backend", st.get("backend", "qdrant")),
         qdrant_url=_env_override("store", "qdrant_url", st.get("qdrant_url", "")),
         qdrant_api_key=_env_override("store", "qdrant_api_key", st.get("qdrant_api_key", "")),
     )

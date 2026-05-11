@@ -1,6 +1,6 @@
 """VectorStore protocol — backend-agnostic interface for vector storage.
 
-Every vector store backend (Chroma, Qdrant, …) implements ``VectorStore``
+Every vector store backend implements ``VectorStore``
 so that the rest of the codebase never imports a concrete backend directly.
 
 Usage::
@@ -54,6 +54,7 @@ class VectorStore(Protocol):
         metadatas: list[dict],
         *,
         collection: str = "obsidian_vault",
+        sparse_vectors: list[dict] | None = None,
     ) -> None:
         """Insert or update a batch of vectors."""
         ...
@@ -82,13 +83,16 @@ class VectorStore(Protocol):
         *,
         collection: str = "obsidian_vault",
         filters: dict | None = None,
+        sparse_query: dict | None = None,
     ) -> list[QueryResult]:
         """Return the *n* nearest neighbours for *embedding*.
 
         Args:
             filters: Optional metadata filter — ``{"field": "value"}`` for
-                     equality matching.  Translated to backend-specific syntax
-                     (Qdrant ``FieldCondition`` / ChromaDB ``where``).
+                     equality matching.  Translated to Qdrant
+                     ``FieldCondition`` syntax.
+            sparse_query: Optional BM25 sparse vector ``{indices, values}``
+                          for hybrid (dense + sparse) retrieval with RRF.
         """
         ...
 
@@ -105,7 +109,7 @@ def create_store(backend: str | None = None, **kwargs) -> VectorStore:
     """Instantiate the configured vector store backend.
 
     Args:
-        backend: ``"chroma"`` or ``"qdrant"``.  If *None*, reads from
+        backend: ``"qdrant"``.  If *None*, reads from
                  ``settings.store.backend``.
         **kwargs: forwarded to the backend constructor.
     """
@@ -115,12 +119,8 @@ def create_store(backend: str | None = None, **kwargs) -> VectorStore:
 
     backend = backend.lower().strip()
 
-    if backend == "chroma":
-        from obsidian_rag.store.chroma_store import ChromaVectorStore
-        return ChromaVectorStore(**kwargs)
-
     if backend == "qdrant":
         from obsidian_rag.store.qdrant_store import QdrantVectorStore
         return QdrantVectorStore(**kwargs)
 
-    raise ValueError(f"Unknown vector store backend: {backend!r}  (expected 'chroma' or 'qdrant')")
+    raise ValueError(f"Unknown vector store backend: {backend!r}  (expected 'qdrant')")

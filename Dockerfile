@@ -33,7 +33,7 @@ COPY rag.toml .
 RUN pip install --no-cache-dir --upgrade setuptools wheel \
     && pip uninstall -y pip setuptools wheel
 
-# ChromaDB data volume — writable pelo user rag
+# Vector store data volume — writable pelo user rag
 RUN mkdir -p /app/data && chown -R rag:rag /app
 VOLUME ["/app/data"]
 

@@ -264,7 +264,7 @@ def _generate_toml(
 
 [paths]
 source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
-data_dir = "data/chroma"
+data_dir = "data/qdrant"
 vault_dir = "{vault_dir}"       # fonte principal dos dados Obsidian
 
 [sync]
@@ -488,7 +488,7 @@ def run_init(args: Namespace) -> None:
     print(f"✓ Configuração escrita em {toml_path}")
 
     # --- Create directories ---
-    dirs_to_create = ["data/chroma", "data/graphify"]
+    dirs_to_create = ["data/qdrant", "data/graphify"]
     if sync_backend != "direct":
         dirs_to_create.append("source")
     for d in dirs_to_create:

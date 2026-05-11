@@ -28,7 +28,7 @@ O obsidian-rag é uma ferramenta **local-first**:
 - **Todos os dados ficam na máquina do utilizador** — notas, embeddings, grafos, base vetorial
 - **Nenhum dado é enviado para serviços externos** — embeddings via Ollama local, chunking via AST stdlib
 - **A API corre em `127.0.0.1` por defeito** — não acessível na rede local
-- **ChromaDB opera com `anonymized_telemetry=False`**
+- **Qdrant opera localmente sem telemetria externa**
 
 ### API REST
 
@@ -71,7 +71,7 @@ Esta política cobre:
 
 **Fora de scope:**
 
-- Vulnerabilidades no Ollama, ChromaDB, ou dependências upstream — reportar directamente aos projectos respectivos
+- Vulnerabilidades no Ollama, Qdrant, ou dependências upstream — reportar directamente aos projectos respectivos
 - Configuração do sistema operativo do utilizador
 - Segurança da rede local do utilizador
 

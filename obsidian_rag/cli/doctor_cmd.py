@@ -85,7 +85,6 @@ def run_doctor() -> None:
     # 3. Dependencies
     print("─── Dependências ───")
     deps = {
-        "chromadb": "chromadb",
         "fastapi": "fastapi",
         "uvicorn": "uvicorn",
         "httpx": "httpx",
