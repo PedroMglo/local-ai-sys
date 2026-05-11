@@ -207,3 +207,49 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
+
+  # ── Testes com Qdrant server mode (concorrência) ─────────────────────────
+  test-server-mode:
+    name: Qdrant server mode tests
+    runs-on: ubuntu-latest
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.13.2
+        ports:
+          - 6333:6333
+        options: >-
+          --health-cmd "curl -sf http://localhost:6333/healthz || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 10s
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:6333/healthz && break
+            echo "Waiting for Qdrant... ($i)"
+            sleep 1
+          done
+
+      - name: Run vector store + concurrency tests (server mode)
+        env:
+          QDRANT_TEST_URL: http://localhost:6333
+        run: >
+          pytest tests/test_vector_store.py tests/test_concurrency.py
+          -v --tb=short --timeout=120
