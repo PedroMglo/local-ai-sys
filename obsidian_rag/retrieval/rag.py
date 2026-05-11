@@ -6,7 +6,6 @@ determines it's needed AND retrieval quality passes the relevance gate.
 
 import logging
 import math as _math
-import threading
 import time as _time
 import unicodedata
 from pathlib import Path as _Path
@@ -19,7 +18,7 @@ from obsidian_rag.retrieval.intent import detect_intent_full
 from obsidian_rag.retrieval.observe import QueryTrace
 from obsidian_rag.retrieval.router import _GRAPH_PATTERNS, _GRAPH_SIGNALS, ContextMode
 from obsidian_rag.retrieval.sparse import BM25Vectorizer, tokenize
-from obsidian_rag.store.base import VectorStore, create_store
+from obsidian_rag.store import VectorStore, _reset_store, get_store
 
 log = logging.getLogger("obsidian_rag")
 
@@ -51,32 +50,17 @@ _NAVIGATION_SECTIONS = frozenset({
 })
 
 
-# === VectorStore singleton ===
-_lock = threading.Lock()
-_store: VectorStore | None = None
+# === VectorStore singleton (delegated to obsidian_rag.store) ===
 
 
 def _get_store(*, _override: VectorStore | None = None) -> VectorStore:
-    """Lazy singleton for the configured vector store.
-
-    Args:
-        _override: inject a store for testing (bypasses singleton).
-    """
-    global _store
-    if _override is not None:
-        return _override
-    if _store is None:
-        with _lock:
-            if _store is None:
-                _store = create_store()
-    return _store
+    """Proxy to the process-wide singleton in obsidian_rag.store."""
+    return get_store(_override=_override)
 
 
 def _reset_collections():
     """Reset singletons — for testing only."""
-    global _store
-    with _lock:
-        _store = None
+    _reset_store()
 
 
 # === Collection-size cache (TTL 60 s) ===

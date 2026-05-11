@@ -16,6 +16,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from obsidian_rag.store.base import QueryResult
@@ -23,6 +24,8 @@ from obsidian_rag.store.base import QueryResult
 log = logging.getLogger(__name__)
 
 _VECTOR_DIM = 1024  # bge-m3
+_MAX_RETRIES = 3
+_RETRY_BACKOFF = 0.5  # seconds — doubles each retry
 
 
 def _import_qdrant():
@@ -35,6 +38,33 @@ def _import_qdrant():
             "qdrant-client is required for the Qdrant backend.  "
             "Install it with:  pip install 'qdrant-client>=1.9'"
         ) from None
+
+
+def _retry(fn, *, max_retries: int = _MAX_RETRIES, backoff: float = _RETRY_BACKOFF):
+    """Execute *fn* with exponential-backoff retry on transient errors.
+
+    Only retries connection/timeout errors — not logic errors.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            exc_name = type(exc).__name__
+            # Only retry on transient network / timeout errors
+            is_transient = any(kw in exc_name.lower() for kw in (
+                "connection", "timeout", "unavailable", "transport",
+            )) or any(kw in str(exc).lower() for kw in (
+                "connection", "timed out", "unavailable", "refused",
+            ))
+            if not is_transient or attempt == max_retries:
+                raise
+            last_exc = exc
+            wait = backoff * (2 ** attempt)
+            log.warning("Qdrant: %s (attempt %d/%d) — retry in %.1fs",
+                        exc, attempt + 1, max_retries, wait)
+            time.sleep(wait)
+    raise last_exc  # type: ignore[misc]  # unreachable but keeps mypy happy
 
 
 class QdrantVectorStore:
@@ -160,10 +190,11 @@ class QdrantVectorStore:
 
         # Qdrant recommends batches ≤ 100
         for i in range(0, len(points), 100):
-            self._client.upsert(
+            batch = points[i : i + 100]
+            _retry(lambda b=batch: self._client.upsert(
                 collection_name=collection,
-                points=points[i : i + 100],
-            )
+                points=b,
+            ))
 
     def delete_ids(
         self,
@@ -177,20 +208,21 @@ class QdrantVectorStore:
         self._ensure_collection(collection)
 
         # Delete by matching the stored _id field
-        self._client.delete(
-            collection_name=collection,
-            points_selector=models.FilterSelector(
-                filter=models.Filter(
-                    should=[
-                        models.FieldCondition(
-                            key="_id",
-                            match=models.MatchValue(value=rid),
-                        )
-                        for rid in ids
-                    ],
-                ),
+        selector = models.FilterSelector(
+            filter=models.Filter(
+                should=[
+                    models.FieldCondition(
+                        key="_id",
+                        match=models.MatchValue(value=rid),
+                    )
+                    for rid in ids
+                ],
             ),
         )
+        _retry(lambda: self._client.delete(
+            collection_name=collection,
+            points_selector=selector,
+        ))
         return len(ids)
 
     def get_existing_ids(
@@ -212,7 +244,7 @@ class QdrantVectorStore:
             if offset is not None:
                 scroll_kwargs["offset"] = offset
 
-            points, next_offset = self._client.scroll(**scroll_kwargs)
+            points, next_offset = _retry(lambda kw=dict(scroll_kwargs): self._client.scroll(**kw))
             for p in points:
                 _id = p.payload.get("_id") if p.payload else None
                 if _id:
@@ -246,7 +278,7 @@ class QdrantVectorStore:
 
         # Hybrid search: dense prefetch + sparse, fused with RRF
         if sparse_query and sparse_query.get("indices"):
-            response = self._client.query_points(
+            response = _retry(lambda: self._client.query_points(
                 collection_name=collection,
                 prefetch=[
                     models.Prefetch(
@@ -268,15 +300,15 @@ class QdrantVectorStore:
                 query=models.FusionQuery(fusion=models.Fusion.RRF),
                 limit=n,
                 with_payload=True,
-            )
+            ))
         else:
-            response = self._client.query_points(
+            response = _retry(lambda: self._client.query_points(
                 collection_name=collection,
                 query=embedding,
                 limit=n,
                 with_payload=True,
                 query_filter=query_filter,
-            )
+            ))
         results = []
         for hit in response.points:
             payload = dict(hit.payload) if hit.payload else {}
@@ -292,8 +324,16 @@ class QdrantVectorStore:
 
     def count(self, *, collection: str = "obsidian_vault") -> int:
         self._ensure_collection(collection)
-        info = self._client.get_collection(collection)
+        info = _retry(lambda: self._client.get_collection(collection))
         return info.points_count or 0
+
+    def health(self) -> bool:
+        """Return *True* if Qdrant backend is reachable."""
+        try:
+            self._client.get_collections()
+            return True
+        except Exception:
+            return False
 
 
 # ---------------------------------------------------------------------------

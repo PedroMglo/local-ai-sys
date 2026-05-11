@@ -33,7 +33,7 @@
 | **Complexidade**       | Média                                                                 |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`                                            |
 
-**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 416 testes (3 skipped) em 21 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 18 para graphify incremental). Faltam integration tests e2e com Ollama.
+**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 432 testes (3 skipped) em 22 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 18 para graphify incremental + 16 para multi-vault). Faltam integration tests e2e com Ollama.
 
 ### 1.2 ~~Singletons mutáveis para coleções do vector store~~ ✅ RESOLVIDO
 
@@ -571,7 +571,7 @@ A arquitetura é single-process (uvicorn sem workers configurados). O httpx pool
 
 **Resolução (2026-05-11 — #187):** Criado guia operacional completo em `docs/QDRANT_SERVER_MODE.md` cobrindo: critérios de migração (>50k chunks, acesso concorrente), setup via Docker Compose (`docker compose --profile qdrant up`), configuração em `rag.toml` (`qdrant_url`, `qdrant_api_key`), métodos de migração de dados (re-sync vs snapshots), passos de verificação, procedimento de rollback, tabela comparativa embedded vs server, e notas de segurança (API key quando exposto na LAN). Tarefa documental — sem alterações de código.
 
-### 8.10 Multi-vault Obsidian
+### 8.10 ~~Multi-vault Obsidian~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                                                                                                                                |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -580,7 +580,7 @@ A arquitetura é single-process (uvicorn sem workers configurados). O httpx pool
 | **Complexidade**       | Média — alteração a `PathsConfig`, `sync_notes()`, `rag.toml`, e lógica de coleções                                                                                    |
 | **Ficheiros afetados** | `obsidian_rag/config.py`, `obsidian_rag/pipeline/sync.py`, `rag.toml`, `obsidian_rag/retrieval/rag.py`                                                                 |
 
-**Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #188).
+**Resolução (2026-05-12):** Implementado suporte multi-vault. `PathsConfig.vault_dirs: tuple[Path, ...]` é populado a partir de `vault_dirs = [...]` em `rag.toml`; se ausente, retrocede para `(vault_dir,)` (backward compat). `sync_notes()` itera todos os vault dirs, cria um `IngestSource` por vault com `name=vault_dir.name`. O ingest pipeline injeta `source_name` no metadata de cada chunk (via `setdefault`). `QueryRequest.vault` permite filtrar por vault na API (`/query`). CLI: `rag sync -l --vault NAME` e `rag query --vault NAME`. 16 testes em `test_multi_vault.py` (config, sync filter, source_name injection, API schema, CLI parsing). 432 testes passam.
 
 ---
 

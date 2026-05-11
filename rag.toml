@@ -187,7 +187,10 @@ abort_swap_percent = 80
 [store]
 backend = "qdrant"
 # URL do servidor Qdrant (vazio = modo embedded local). Exemplo: "http://localhost:6333"
-qdrant_url = ""
+# Server mode recomendado para concorrência (múltiplos modelos/queries simultâneas)
+# Arrancar: docker compose --profile qdrant up -d  (ou: make qdrant)
+# Rollback para embedded: qdrant_url = ""
+qdrant_url = "http://localhost:6333"
 # API key para Qdrant Cloud (vazio = sem autenticação)
 qdrant_api_key = ""
 

@@ -100,6 +100,10 @@ class VectorStore(Protocol):
         """Return the number of vectors in the collection."""
         ...
 
+    def health(self) -> bool:
+        """Return *True* if the backend is reachable and operational."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Factory

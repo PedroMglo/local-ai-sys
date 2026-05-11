@@ -22,7 +22,7 @@ from obsidian_rag.embeddings.ollama import clear_embed_cache
 from obsidian_rag.pipeline.ingest import IngestPipeline, IngestSource
 from obsidian_rag.pipeline.manifest import IngestManifest
 from obsidian_rag.pipeline.vault_sync import sync_vault
-from obsidian_rag.store.base import create_store
+from obsidian_rag.store import get_store
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ def sync_notes(*, vault_filter: str | None = None) -> None:
     manifest_path = settings.paths.data_dir / "manifest.db"
     manifest = IngestManifest(manifest_path)
 
-    store = create_store()
+    store = get_store()
 
     pipeline = IngestPipeline(
         manifest=manifest,
@@ -208,7 +208,7 @@ def sync_repos() -> None:
     manifest_path = settings.paths.data_dir / "manifest.db"
     manifest = IngestManifest(manifest_path)
 
-    store = create_store()
+    store = get_store()
 
     sources = [
         IngestSource(source_type="code", path=p, name=p.name)
