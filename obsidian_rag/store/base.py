@@ -115,11 +115,18 @@ def create_store(backend: str | None = None, **kwargs) -> VectorStore:
     Args:
         backend: ``"qdrant"``.  If *None*, reads from
                  ``settings.store.backend``.
-        **kwargs: forwarded to the backend constructor.
+        **kwargs: forwarded to the backend constructor.  When called
+                  without kwargs, reads ``qdrant_url`` / ``qdrant_api_key``
+                  from ``settings.store``.
     """
     if backend is None:
         from obsidian_rag.config import settings
         backend = settings.store.backend
+        # Inject config values unless the caller already provided them
+        if "url" not in kwargs and settings.store.qdrant_url:
+            kwargs["url"] = settings.store.qdrant_url
+        if "api_key" not in kwargs and settings.store.qdrant_api_key:
+            kwargs["api_key"] = settings.store.qdrant_api_key
 
     backend = backend.lower().strip()
 
