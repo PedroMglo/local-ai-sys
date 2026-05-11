@@ -1,7 +1,7 @@
 # IMPROVEMENTS AND RISKS — obsidian-rag
 
-> **Versão:** 0.5.2 → v1.1 (plano)
-> **Última atualização:** 2026-05-11
+> **Versão:** 0.5.3 → v1.1 (plano)
+> **Última atualização:** 2026-05-12
 > **Âmbito:** Análise crítica de falhas, riscos, melhorias e roadmap
 
 ---
@@ -33,7 +33,7 @@
 | **Complexidade**       | Média                                                                 |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`                                            |
 
-**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 432 testes (3 skipped) em 22 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 18 para graphify incremental + 16 para multi-vault). Faltam integration tests e2e com Ollama.
+**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 436 testes (4 skipped) em 23 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 18 para graphify incremental + 16 para multi-vault + 4 para concorrência). Faltam integration tests e2e com Ollama.
 
 ### 1.2 ~~Singletons mutáveis para coleções do vector store~~ ✅ RESOLVIDO
 
@@ -44,7 +44,7 @@
 | **Complexidade**       | Baixa                                                                                                  |
 | **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py` (`_store`), `obsidian_rag/store/base.py` (ChromaDB removido em v0.5.2) |
 
-**Resolução (2026-05-10):** Inicialmente `_get_collection()` e `_get_code_collection()` aceitavam parâmetro `_override`. Na Phase 3, substituídos por singleton `_get_store()` que devolve um `VectorStore`. Testes usam `_get_store` mock com `QdrantVectorStore` in-memory. `_reset_collections()` renomeado para reset do `_store`. 16 integration tests validam o padrão. **Atualização v0.5.2:** `ChromaVectorStore` e `chroma_store.py` completamente removidos.
+**Resolução (2026-05-10):** Inicialmente `_get_collection()` e `_get_code_collection()` aceitavam parâmetro `_override`. Na Phase 3, substituídos por singleton `_get_store()` que devolve um `VectorStore`. Testes usam `_get_store` mock com `QdrantVectorStore` in-memory. `_reset_collections()` renomeado para reset do `_store`. 16 integration tests validam o padrão. **Atualização v0.5.2:** `ChromaVectorStore` e `chroma_store.py` completamente removidos. **Atualização v0.5.3 (#188):** Singleton centralizado em `store/__init__.py` como `get_store()` process-wide com `threading.Lock`. `rag.py` mantém `_get_store()` como thin proxy para backward compat. `sync.py` usa `get_store()` — elimina instâncias QdrantClient duplicadas que apontavam para o mesmo directório embedded.
 
 ### 1.3 ~~Acoplamento entre retrieval e ChromaDB~~ ✅ RESOLVIDO (ChromaDB removido em v0.5.2)
 
@@ -168,7 +168,7 @@
 
 **Resolução (2026-05-10):** Pipeline CI/CD completa com 3 workflows GitHub Actions:
 
-- **`ci.yml`** — 5 jobs: lint (ruff + mypy), test matrix (ubuntu/macos/windows × Python 3.11/3.12 com pytest-cov --fail-under=30), CLI smoke (3 OS), config & vault_sync tests, security audit (secrets, .env, .gitignore, Docker host binding)
+- **`ci.yml`** — 6 jobs: lint (ruff + mypy), test matrix (ubuntu/macos/windows × Python 3.11/3.12 com pytest-cov --fail-under=30), CLI smoke (3 OS), config & vault_sync tests, security audit (secrets, .env, .gitignore, Docker host binding), **test-server-mode** (Qdrant service container + `test_vector_store.py` + `test_concurrency.py` com `QDRANT_TEST_URL`)
 - **`docker.yml`** — Docker build com Buildx cache, compose config, sanity check (import + CLI no container)
 - **`release.yml`** — Trigger em tags `v*`, reutiliza CI, build wheel/sdist, GitHub Release automático, Docker image build
 
@@ -220,7 +220,7 @@ Desde a Phase 1 (v0.5.0), `PipelineConfig.max_workers` é **efectivamente dead c
 | **Complexidade**       | Baixa                                                                           |
 | **Ficheiros afetados** | `obsidian_rag/retrieval/rag.py`                                                 |
 
-**Resolução (2026-05-10):** Adicionado `threading.Lock()` com padrão double-checked locking em `_get_store()` (anteriormente `_get_collection()` e `_get_code_collection()`). Reset thread-safe para cleanup em testes.
+**Resolução (2026-05-10):** Adicionado `threading.Lock()` com padrão double-checked locking em `_get_store()` (anteriormente `_get_collection()` e `_get_code_collection()`). Reset thread-safe para cleanup em testes. **Atualização v0.5.3 (#188):** Lock centralizado em `store/__init__.py` — `get_store()` process-wide com `threading.Lock`. Retrieval (`rag.py`) e pipeline (`sync.py`) partilham a mesma instância.
 
 ### 4.2 ~~Keyword search sem normalização Unicode~~ ✅ RESOLVIDO
 
@@ -461,7 +461,7 @@ SQLite manifest (`IngestManifest`) com WAL mode e `threading.Lock` permite crash
 
 ## 8. Escalabilidade
 
-### 8.1 Single-process, single-user
+### 8.1 Single-process, single-user (parcialmente resolvido)
 
 | Campo                  | Detalhe                           |
 | ---------------------- | --------------------------------- |
@@ -471,6 +471,8 @@ SQLite manifest (`IngestManifest`) com WAL mode e `threading.Lock` permite crash
 | **Ficheiros afetados** | `obsidian_rag/api/app.py`         |
 
 A arquitetura é single-process (uvicorn sem workers configurados). O httpx pool tem limit de 10 conexões. Para uso pessoal é adequado; para multi-utilizador seria necessário redesenhar.
+
+**Atualização v0.5.3 (#188):** Concorrência de queries RAG resolvida via Qdrant server mode. Múltiplos modelos AI podem agora fazer queries simultaneamente via orquestrador sem deadlocks. O singleton `get_store()` process-wide com `threading.Lock` garante thread-safety. `_retry()` com exponential backoff trata erros de rede transientes. Limitação restante: uvicorn single-worker.
 
 ### 8.2 ~~ChromaDB como único vector store~~ ✅ RESOLVIDO (ChromaDB removido em v0.5.2)
 
@@ -569,7 +571,23 @@ A arquitetura é single-process (uvicorn sem workers configurados). O httpx pool
 | **Complexidade**       | Baixa — infraestrutura já existe, falta documentación operacional                                                                                                                         |
 | **Ficheiros afetados** | `docker-compose.yml`, `docs/QDRANT_SERVER_MODE.md`                                                                                                                                        |
 
-**Resolução (2026-05-11 — #187):** Criado guia operacional completo em `docs/QDRANT_SERVER_MODE.md` cobrindo: critérios de migração (>50k chunks, acesso concorrente), setup via Docker Compose (`docker compose --profile qdrant up`), configuração em `rag.toml` (`qdrant_url`, `qdrant_api_key`), métodos de migração de dados (re-sync vs snapshots), passos de verificação, procedimento de rollback, tabela comparativa embedded vs server, e notas de segurança (API key quando exposto na LAN). Tarefa documental — sem alterações de código.
+**Resolução (2026-05-11 — #187, atualização 2026-05-12 — #188):** Criado guia operacional completo em `docs/QDRANT_SERVER_MODE.md`. **Implementação (#188):** Concorrência real com Qdrant server mode:
+
+1. **`docker-compose.yml`:** Healthcheck (`curl /healthz`, 15s interval), `mem_limit: 512m`, `mem_reservation: 256m`, tuning mmap (`ON_DISK_PAYLOAD=true`, `MMAP_THRESHOLD_KB=20480`)
+2. **`qdrant_store.py`:** `_retry()` helper com exponential backoff (3 retries, 0.5s base) em todos os API calls (upsert, delete, scroll, query, count) para erros de rede transientes. `health() -> bool` para verificar reachability do backend
+3. **`base.py`:** `health() -> bool` adicionado ao `VectorStore` Protocol (6 métodos agora)
+4. **`store/__init__.py`:** Singleton process-wide `get_store()` com `threading.Lock` — retrieval e pipeline partilham a mesma instância. `_reset_store()` para testes
+5. **`rag.py`:** `_get_store()` convertido em thin proxy para `store.get_store()` — duplicação de lógica singleton removida
+6. **`sync.py`:** `create_store()` → `get_store()` — elimina instâncias QdrantClient duplicadas que apontavam para o mesmo directório embedded (causa de deadlocks)
+7. **`rag.toml`:** `qdrant_url` default `"http://localhost:6333"` (server mode como default para concorrência). Rollback a embedded: `qdrant_url = ""`
+8. **`Makefile`:** Targets `qdrant` e `qdrant-down` para gestão do serviço
+9. **CI (`ci.yml`):** Job `test-server-mode` com Qdrant service container — executa `test_vector_store.py` + `test_concurrency.py` com `QDRANT_TEST_URL`
+10. **`test_vector_store.py`:** Fixture condicional (`QDRANT_TEST_URL`), `TestHealth`
+11. **`test_concurrency.py` (novo):** 4 testes — `TestParallelQueries` (10 threads), `TestQueryDuringUpsert` (server-only), `TestMultiCollectionUpsert` (3 threads), `TestHealthUnderLoad`
+
+**Motivação:** Múltiplos modelos AI a fazer queries RAG concorrentes via orquestrador. Qdrant embedded tem exclusividade de file-lock que causa deadlocks e timeouts sob acesso concorrente. Server mode resolve com acesso concorrente nativo.
+
+**Baseline:** obsidian_notes: 0, code_repos: 369 chunks. 436 testes passam (4 skipped).
 
 ### 8.10 ~~Multi-vault Obsidian~~ ✅ RESOLVIDO
 
@@ -622,7 +640,7 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | **Complexidade**       | Média                                  |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`             |
 
-**Resolução (2026-05-10):** 329 testes (18 skipped) implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority + 42 vault_sync/cross-platform + 25 manifest + 10 ingest pipeline + 21 governor + 34 vector store protocol + 22 tree-sitter chunking + 6 dask engine + 18 graphify incremental). Total actual: 416 testes (3 skipped) em 21 ficheiros. Cobertura de chunking (markdown + code + tree-sitter multi-linguagem), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation (cross-platform), bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout, vault_sync backends (direct/python/rsync/auto), exclude patterns, incremental copy, delete_missing, `IngestManifest` (SQLite CRUD, crash recovery), `IngestPipeline` (bounded stages, backpressure), `ResourceGovernor` (thresholds, lifecycle, wait_until_safe, metrics JSONL, tuning backward compat), `VectorStore` protocol (upsert, query, delete, count, collection isolation, factory, Qdrant embedded), Dask engine factory (`create_parser_pool`, `DaskParserPool`), graphify incremental (`_file_md5`, `_detect_changes`, `build_graph` 3-tier) e integration tests com TestClient + QdrantVectorStore in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
+**Resolução (2026-05-10):** 329 testes (18 skipped) implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority + 42 vault_sync/cross-platform + 25 manifest + 10 ingest pipeline + 21 governor + 34 vector store protocol + 22 tree-sitter chunking + 6 dask engine + 18 graphify incremental). Total actual: 436 testes (4 skipped) em 23 ficheiros. Cobertura de chunking (markdown + code + tree-sitter multi-linguagem), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation (cross-platform), bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout, vault_sync backends (direct/python/rsync/auto), exclude patterns, incremental copy, delete_missing, `IngestManifest` (SQLite CRUD, crash recovery), `IngestPipeline` (bounded stages, backpressure), `ResourceGovernor` (thresholds, lifecycle, wait_until_safe, metrics JSONL, tuning backward compat), `VectorStore` protocol (upsert, query, delete, count, collection isolation, factory, Qdrant embedded/server, health), Dask engine factory (`create_parser_pool`, `DaskParserPool`), graphify incremental (`_file_md5`, `_detect_changes`, `build_graph` 3-tier), concorrência (parallel queries, query during upsert, multi-collection, health under load) e integration tests com TestClient + QdrantVectorStore in-memory. Fixtures partilhadas em `conftest.py`. Testes de concorrência com Qdrant server validados em CI via `test-server-mode` job.
 
 ### 10.2 ~~Autenticação da API~~ ✅ RESOLVIDO
 
@@ -998,7 +1016,7 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | 136 | ~~**ELIMINADO `store/chroma.py`**: módulo legacy removido — funcionalidade absorvida por `qdrant_store.py` e `pipeline/sync.py`~~                     | Média        | ✅ Concluído |
 | 137 | ~~`sync.py`: import `from store.base import VectorStore, create_store`; novo `_sync_chunks_to_store()` helper para sync incremental via VectorStore~~ | Média        | ✅ Concluído |
 | 138 | ~~`sync.py`: `sync_notes()` usa `_sync_chunks_to_store(chunks, collection="obsidian_vault")` + `create_store().count()`~~                             | Baixa        | ✅ Concluído |
-| 139 | ~~`sync.py`: `sync_repos()` cria store via `create_store()`, passa `store` + `collection_name` ao IngestPipeline~~                                    | Baixa        | ✅ Concluído |
+| 139 | ~~`sync.py`: `sync_repos()` cria store via `get_store()`, passa `store` + `collection_name` ao IngestPipeline~~                                       | Baixa        | ✅ Concluído |
 | 140 | ~~`ingest.py`: construtor alterado — `collection` → `store` (VectorStore) + `collection_name: str`; writer usa `store.upsert_batch()`~~               | Média        | ✅ Concluído |
 | 141 | ~~`ingest.py`: `_cleanup_stale()` usa `store.get_existing_ids()` + `store.delete_ids()` via VectorStore protocol~~                                    | Baixa        | ✅ Concluído |
 | 142 | ~~`backup.py`: `backup_chroma()` → `backup_store()`; ficheiros nomeados `store_backup_*`~~                                                            | Baixa        | ✅ Concluído |
@@ -1079,6 +1097,26 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 
 ---
 
+### Fase 21 — Concorrência real com Qdrant server mode (v0.5.3, 2026-05-12, #191) ✅
+
+| #   | Tarefa                                                                                                                                | Complexidade | Estado       |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ |
+| 192 | ~~`docker-compose.yml`: healthcheck Qdrant (`curl /healthz`, 15s), `mem_limit: 512m`, `mem_reservation: 256m`, mmap tuning env vars~~ | Baixa        | ✅ Concluído |
+| 193 | ~~`qdrant_store.py`: `_retry()` helper com exponential backoff (3 retries, 0.5s) em todos os Qdrant API calls~~                       | Média        | ✅ Concluído |
+| 194 | ~~`qdrant_store.py` + `base.py`: `health() -> bool` method no VectorStore Protocol (6 métodos agora)~~                                | Baixa        | ✅ Concluído |
+| 195 | ~~`store/__init__.py`: singleton process-wide `get_store()` com `threading.Lock` + `_reset_store()` para testes~~                     | Média        | ✅ Concluído |
+| 196 | ~~`rag.py`: `_get_store()` convertido em thin proxy para `store.get_store()` — remove duplicação de singleton~~                       | Baixa        | ✅ Concluído |
+| 197 | ~~`sync.py`: `create_store()` → `get_store()` — elimina dual QdrantClient no mesmo directório embedded~~                              | Baixa        | ✅ Concluído |
+| 198 | ~~`rag.toml`: `qdrant_url = "http://localhost:6333"` (server mode como default para concorrência)~~                                   | Baixa        | ✅ Concluído |
+| 199 | ~~`Makefile`: targets `qdrant` e `qdrant-down`~~                                                                                      | Baixa        | ✅ Concluído |
+| 200 | ~~`ci.yml`: job `test-server-mode` com Qdrant service container (ubuntu-latest, `QDRANT_TEST_URL`)~~                                  | Média        | ✅ Concluído |
+| 201 | ~~`test_vector_store.py`: fixture condicional `QDRANT_TEST_URL`, `TestHealth`~~                                                       | Baixa        | ✅ Concluído |
+| 202 | ~~`test_concurrency.py` (novo): `TestParallelQueries`, `TestQueryDuringUpsert`, `TestMultiCollectionUpsert`, `TestHealthUnderLoad`~~  | Média        | ✅ Concluído |
+
+> **Fase 21 concluída em 2026-05-12.** Concorrência real com Qdrant server mode para suportar múltiplos modelos AI a fazer queries RAG simultaneamente via orquestrador. Qdrant embedded tinha exclusividade de file-lock que causava deadlocks e timeouts sob acesso concorrente. A solução centraliza o store num singleton process-wide (`get_store()`) com `threading.Lock`, adiciona retry com exponential backoff em todos os API calls, implementa `health()` no VectorStore Protocol, e configura server mode como default em `rag.toml`. Docker Compose com healthcheck, limites de memória e tuning mmap. CI com job dedicado `test-server-mode` usando Qdrant service container. 4 novos testes de concorrência + `TestHealth`. Baseline: 369 chunks em `code_repos`. 436 testes passam (4 skipped). Ficheiros afetados: `docker-compose.yml`, `qdrant_store.py`, `base.py`, `store/__init__.py` (novo conteúdo), `rag.py`, `sync.py`, `rag.toml`, `Makefile`, `.github/workflows/ci.yml`, `test_vector_store.py`, `test_concurrency.py` (novo).
+
+---
+
 ### Fase 20 — Escalabilidade para bases de conhecimento maiores (v1.1)
 
 > **Objectivo:** Preparar o obsidian-rag para crescer de centenas para milhares de notas e dezenas de repos, sem degradação de performance ou qualidade de retrieval.
@@ -1112,9 +1150,10 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | #   | Tarefa                                                                                                                                                                                                                                 | Complexidade | Estado       | Ref   |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ----- |
 | 187 | ~~**Documentação operacional Qdrant server**~~ — guia completo em `docs/QDRANT_SERVER_MODE.md`: migração embedded→server, Docker Compose, configuração `rag.toml`, migração de dados, verificação, rollback, comparação, segurança     | Baixa        | ✅ Concluído | §8.9  |
-| 188 | **Multi-vault Obsidian** — suportar `vault_dirs = [...]` em `rag.toml` com coleções separadas por vault. Alteração a `PathsConfig`, `sync_notes()`, lógica de coleções, e queries scoped (`rag query --vault pessoal "texto"`)         | Média        | Não iniciado | §8.10 |
+| 188 | ~~**Multi-vault Obsidian**~~ — `vault_dirs = [...]` em `rag.toml` com coleções separadas por vault. `PathsConfig`, `sync_notes()`, queries scoped. 16 testes em `test_multi_vault.py`                                                  | Média        | ✅ Concluído | §8.10 |
 | 189 | **Ollama env vars no systemd** — automatizar configuração de `OLLAMA_NUM_PARALLEL=2` e `OLLAMA_MAX_LOADED_MODELS=2` via `rag init` ou `rag doctor --fix`. Verifica se as env vars estão definidas no serviço Ollama e sugere correcção | Baixa        | Não iniciado | —     |
 | 190 | **Métricas de sync em dashboard** — exportar métricas do pipeline (chunks/s, tempo por fase, VRAM usage) para ficheiro JSON/Parquet consultável. Possibilidade futura de dashboard web via `/metrics` endpoint                         | Baixa        | Não iniciado | —     |
+| 191 | ~~**Concorrência real com Qdrant server mode**~~ — singleton `get_store()` process-wide, `_retry()` exponential backoff, `health()` no protocol, server mode como default, healthcheck Docker, CI com Qdrant service container         | Média        | ✅ Concluído | §8.9  |
 
 #### Ordem de execução recomendada
 
@@ -1143,9 +1182,10 @@ Sprint 3 — Latência e throughput
 Sprint 4 — Infraestrutura futura
 ──────────────────────────────────────────────────────────────────
   #187  Docs Qdrant server mode            [Baixa]  ✅ Concluído (QDRANT_SERVER_MODE.md)
-  #188  Multi-vault Obsidian               [Média]  ← quando vaults múltiplos
+  #188  Multi-vault Obsidian               [Média]  ✅ Concluído (2026-05-12)
   #189  Ollama env vars automation         [Baixa]  ← DX improvement
   #190  Métricas de sync em dashboard      [Baixa]  ← observabilidade avançada
+  #191  Concorrência real Qdrant server    [Média]  ✅ Concluído (2026-05-12, #188/191)
 ```
 
 #### Dependências entre tarefas
@@ -1154,7 +1194,8 @@ Sprint 4 — Infraestrutura futura
 #178 ──→ #179 (manifest automático via IngestPipeline)
 #182 ──→ precisa de #183 implementado primeiro (Protocol query com filters)
 #186 ──→ implementado sem dependência de API parcial da lib graphifyy (usa manifest.json nativo)
-#188 ──→ precisa de #183 (queries scoped por coleção/vault)
+#188 ──→ precisa de #183 (queries scoped por coleção/vault) ✅ Concluído
+#191 ──→ precisa de #187 implementado primeiro (docs operacionais) ✅ Concluído
 ```
 
 #### O que NÃO entra na v1.1
