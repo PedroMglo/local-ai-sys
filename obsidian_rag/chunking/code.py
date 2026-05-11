@@ -354,6 +354,7 @@ _IGNORE_DIRS = {
     ".git", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache",
     ".ruff_cache", "node_modules", "dist", "build", ".eggs", "*.egg-info",
     "logs", "models", "output", "rag", "input", "graphify-out", "data",
+    "site-packages", "source",
 }
 
 _IGNORE_FILES = {
@@ -362,13 +363,19 @@ _IGNORE_FILES = {
 }
 
 
+def _is_venv_dir(part: str) -> bool:
+    """True se o nome do directório parece ser um virtual environment."""
+    low = part.lower()
+    return low.startswith(".venv") or low.startswith("venv") or low == "env"
+
+
 def _should_skip(path: Path, repo_dir: Path) -> bool:
     """True se o ficheiro deve ser ignorado."""
     rel = path.relative_to(repo_dir)
     parts = rel.parts
     # Ignorar dirs especiais
     for part in parts[:-1]:  # só dirs (não o filename)
-        if part in _IGNORE_DIRS or part.endswith(".egg-info"):
+        if part in _IGNORE_DIRS or part.endswith(".egg-info") or _is_venv_dir(part):
             return True
     # Ignorar ficheiros específicos
     if path.name in _IGNORE_FILES:

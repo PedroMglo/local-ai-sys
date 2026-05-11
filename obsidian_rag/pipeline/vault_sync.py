@@ -9,7 +9,7 @@ Provides four strategies to get Obsidian notes ready for chunking:
 
 Usage:
     effective_dir = sync_vault(settings)
-    chunks = chunk_all_notes(source_dir=effective_dir)
+    # Pass effective_dir to IngestPipeline via IngestSource(path=effective_dir)
 """
 
 from __future__ import annotations

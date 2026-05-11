@@ -197,13 +197,19 @@ class PerformanceConfig:
     embedding_timeout: int       # max seconds for embedding HTTP calls
     query_timeout_seconds: int   # max seconds for a single query
     graph_timeout: int = 600     # max seconds for a single graphify subprocess
+    enrich_timeout: int = 180     # max seconds for LLM calls in graph enrichment
+    graph_parallel_jobs: int = 1  # parallel graphify subprocesses (1 = sequential)
     # --- Bounded pipeline fields ---
     parser_workers: int = 3              # concurrent file-parsing processes
     embedding_batch_max_chars: int = 48000  # close embedding batch when total chars exceed this
     chunks_queue_max: int = 128          # max pending chunks between parser and embedder
     files_queue_max: int = 256           # max pending files between scanner and parser
-    pause_memory_percent: int = 75       # pause pipeline when RAM% exceeds this
-    abort_memory_percent: int = 85       # abort pipeline when RAM% exceeds this
+    pause_memory_percent: int = 80       # pause pipeline when RAM% exceeds this
+    abort_memory_percent: int = 90       # abort pipeline when RAM% exceeds this
+    # --- Swap protection ---
+    max_swap_percent: int = 40           # reduce when swap% exceeds this
+    pause_swap_percent: int = 60         # pause when swap% exceeds this
+    abort_swap_percent: int = 80         # abort when swap% exceeds this
 
 
 @dataclass(frozen=True)
@@ -365,18 +371,23 @@ def load_settings() -> Settings:
     performance = PerformanceConfig(
         auto_tune=_env_override("performance", "auto_tune", pf.get("auto_tune", True)),
         max_cpu_percent=_env_override("performance", "max_cpu_percent", pf.get("max_cpu_percent", 75)),
-        max_memory_percent=_env_override("performance", "max_memory_percent", pf.get("max_memory_percent", 80)),
+        max_memory_percent=_env_override("performance", "max_memory_percent", pf.get("max_memory_percent", 70)),
         max_parallel_jobs=_env_override("performance", "max_parallel_jobs", pf.get("max_parallel_jobs", 4)),
-        embedding_batch_size=_env_override("performance", "embedding_batch_size", pf.get("embedding_batch_size", 50)),
+        embedding_batch_size=_env_override("performance", "embedding_batch_size", pf.get("embedding_batch_size", 30)),
         embedding_timeout=_env_override("performance", "embedding_timeout", pf.get("embedding_timeout", 120)),
         query_timeout_seconds=_env_override("performance", "query_timeout_seconds", pf.get("query_timeout_seconds", 30)),
         graph_timeout=_env_override("performance", "graph_timeout", pf.get("graph_timeout", 600)),
-        parser_workers=_env_override("performance", "parser_workers", pf.get("parser_workers", 3)),
+        enrich_timeout=_env_override("performance", "enrich_timeout", pf.get("enrich_timeout", 180)),
+        graph_parallel_jobs=_env_override("performance", "graph_parallel_jobs", pf.get("graph_parallel_jobs", 1)),
+        parser_workers=_env_override("performance", "parser_workers", pf.get("parser_workers", 1)),
         embedding_batch_max_chars=_env_override("performance", "embedding_batch_max_chars", pf.get("embedding_batch_max_chars", 48000)),
-        chunks_queue_max=_env_override("performance", "chunks_queue_max", pf.get("chunks_queue_max", 128)),
-        files_queue_max=_env_override("performance", "files_queue_max", pf.get("files_queue_max", 256)),
-        pause_memory_percent=_env_override("performance", "pause_memory_percent", pf.get("pause_memory_percent", 75)),
-        abort_memory_percent=_env_override("performance", "abort_memory_percent", pf.get("abort_memory_percent", 85)),
+        chunks_queue_max=_env_override("performance", "chunks_queue_max", pf.get("chunks_queue_max", 64)),
+        files_queue_max=_env_override("performance", "files_queue_max", pf.get("files_queue_max", 128)),
+        pause_memory_percent=_env_override("performance", "pause_memory_percent", pf.get("pause_memory_percent", 80)),
+        abort_memory_percent=_env_override("performance", "abort_memory_percent", pf.get("abort_memory_percent", 90)),
+        max_swap_percent=_env_override("performance", "max_swap_percent", pf.get("max_swap_percent", 40)),
+        pause_swap_percent=_env_override("performance", "pause_swap_percent", pf.get("pause_swap_percent", 60)),
+        abort_swap_percent=_env_override("performance", "abort_swap_percent", pf.get("abort_swap_percent", 80)),
     )
 
     # Auto-tune: adjust limits based on detected hardware

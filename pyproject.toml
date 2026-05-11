@@ -43,6 +43,13 @@ treesitter = [
 dask = [
     "dask[distributed]>=2024.1",
 ]
+gpu = [
+    "nvidia-ml-py>=12.0",
+]
+profile = [
+    "memray>=1.13",
+    "pytest-timeout>=2.3",
+]
 
 [project.scripts]
 rag = "obsidian_rag.cli.main:main"

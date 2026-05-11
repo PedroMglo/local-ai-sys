@@ -1,6 +1,6 @@
 # IMPROVEMENTS AND RISKS — obsidian-rag
 
-> **Versão:** 0.5.0
+> **Versão:** 0.5.1 → v1.1 (plano)
 > **Última atualização:** 2026-05-11
 > **Âmbito:** Análise crítica de falhas, riscos, melhorias e roadmap
 
@@ -431,6 +431,27 @@ SQLite manifest (`IngestManifest`) com WAL mode e `threading.Lock` permite crash
 
 **Resolução (2026-05-10):** `_llm_route()` agora usa `settings.performance.query_timeout_seconds` em vez de `timeout=15.0` hardcoded. O timeout é configurável via `[performance] query_timeout_seconds` em `rag.toml`. Latência mitigada pelo timeout configurável e heuristic fallback.
 
+### 7.4 Graphify timeout + subutilização GPU ✅ RESOLVIDO (v0.5.1)
+
+| Campo                  | Detalhe                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Prioridade**         | ~~Média~~ — Resolvido                                                                                                           |
+| **Impacto**            | Alto — `rag sync --all` falhava com timeout para repos; GPU NVIDIA subutilizada                                                 |
+| **Complexidade**       | Média                                                                                                                           |
+| **Ficheiros afetados** | `rag.toml`, `obsidian_rag/config.py`, `obsidian_rag/graph/enrich.py`, `obsidian_rag/graph/builder.py`, `obsidian_rag/tuning.py` |
+
+**Problema:** `graphify extract` para `Git_Concepts` excedia `graph_timeout=600s` porque o modelo configurado era `deepseek-r1:8b` (reasoning model que gera tokens `<think>...</think>` extras, 3-5x mais lento por chamada LLM). Adicionalmente, o sistema não aproveitava a VRAM real da GPU para dimensionar batches e paralelismo.
+
+**Resolução (2026-05-11):**
+
+1. **Modelo graphify trocado** para `qwen2.5-coder:7b` — code-optimized, sem overhead de reasoning, ~43 tok/s
+2. **Timeout enrich.py configurável** — `enrich_timeout: int = 180` em `PerformanceConfig`, substituindo `timeout=120` hardcoded em `_call_ollama()`
+3. **graph_timeout bumped** para 900s (margem de segurança)
+4. **Graphify paralelo** — `build_graphs()` refatorado para `ThreadPoolExecutor(max_workers=graph_parallel_jobs)` com guarda VRAM (free ≥ 1.5GB via pynvml). Thread-safe porque cada worker chama `subprocess.run()`. Se `graph_parallel_jobs ≤ 1`, mantém sequencial
+5. **Auto-tune GPU-aware** — `detect_resources()` agora query VRAM real via `_read_vram()` (pynvml). `auto_tune()`: quando VRAM ≥ 6GB → `embedding_batch_size=50`, `embedding_batch_max_chars=60000`, `graph_parallel_jobs=2`
+6. **Sumarização paralela** — `summarize_communities()` usa `ThreadPoolExecutor(max_workers=min(3, n))` para chamadas LLM I/O-bound em paralelo
+7. **Embedding batch boost** — defaults bumped para `batch_size=50`, `max_chars=60000`
+
 ---
 
 ## 8. Escalabilidade
@@ -456,6 +477,94 @@ A arquitetura é single-process (uvicorn sem workers configurados). O httpx pool
 | **Ficheiros afetados** | `obsidian_rag/store/base.py`, `obsidian_rag/store/chroma_store.py`, `obsidian_rag/store/qdrant_store.py` |
 
 **Resolução (2026-05-10 — Phase 3):** Implementado `VectorStore` Protocol com `create_store()` factory. Qdrant disponível como backend alternativo (embedded ou server mode, `qdrant-client>=1.9` como dep opcional). Migração entre backends via `rag migrate`. Para vaults muito grandes, Qdrant em modo server é recomendado.
+
+### 8.3 ~~`sync_notes()` não usa bounded pipeline~~ ✅ RESOLVIDO
+
+| Campo                  | Detalhe                                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Prioridade**         | ~~Alta~~ — Resolvido                                                                                                                                                     |
+| **Impacto**            | Crítico — com 2000+ notas, `chunk_all_notes()` acumulava todos os chunks em memória antes de embedar, replicando o padrão que causou o freeze dos repos (ver postmortem) |
+| **Complexidade**       | Média                                                                                                                                                                    |
+| **Ficheiros afetados** | `obsidian_rag/pipeline/sync.py`, `obsidian_rag/chunking/markdown.py`                                                                                                     |
+
+**Resolução (2026-05-11):** `sync_notes()` reescrito para usar `IngestPipeline` com `collection_name="obsidian_vault"` e `IngestSource(source_type="vault")`. O scanner usa `iter_note_files()` (generator), o parser chama `chunk_note()`, e o pipeline aplica backpressure via bounded queues — mesmo padrão que `sync_repos()`. `_sync_chunks_to_store()` removido (dead code). `chunk_all_notes()` mantida com deprecation docstring para backward compat em testes. Notas usam agora o `IngestManifest` para skip incremental (§8.4 resolvido automaticamente). 366 testes passam.
+
+### 8.4 ~~Notas Obsidian sem tracking incremental (manifest)~~ ✅ RESOLVIDO
+
+| Campo                  | Detalhe                                                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Prioridade**         | ~~Alta~~ — Resolvido                                                                                 |
+| **Impacto**            | Alto — cada `rag sync -l` re-chunkava e re-embedava **todas** as notas mesmo que nada tivesse mudado |
+| **Complexidade**       | Baixa                                                                                                |
+| **Ficheiros afetados** | `obsidian_rag/pipeline/sync.py`, `obsidian_rag/pipeline/manifest.py`                                 |
+
+**Resolução (2026-05-11):** Resolvido automaticamente pela migração de `sync_notes()` para o `IngestPipeline` (§8.3). Notas partilham o mesmo `manifest.db` que os repos — sem colisão porque `source.name` é diferente ("vault" vs nome do repo). Na primeira execução pós-migração, todas as notas são reprocessadas (manifest vazio para vault); em execuções subsequentes, apenas ficheiros alterados são reprocessados via `mtime/size/SHA256`.
+
+### 8.5 Retrieval perde precisão a escala — falta hybrid search
+
+| Campo                  | Detalhe                                                                                                                                                                                                           |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Prioridade**         | Média                                                                                                                                                                                                             |
+| **Impacto**            | Médio — com >5000 chunks, pesquisa puramente vectorial perde precisão para termos técnicos exactos (nomes de funções, variáveis, erros). Qdrant suporta nativamente sparse vectors (BM25-like) para hybrid search |
+| **Complexidade**       | Média — requer sparse embedding + alteração ao `VectorStore` protocol + query fusion                                                                                                                              |
+| **Ficheiros afetados** | `obsidian_rag/store/base.py`, `obsidian_rag/store/qdrant_store.py`, `obsidian_rag/retrieval/rag.py`                                                                                                               |
+
+**Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #182).
+
+### 8.6 ~~Queries de código diluídas — falta filtering por metadata~~ ✅ RESOLVIDO
+
+| Campo                  | Detalhe                                                                                                                                                                                            |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Prioridade**         | ~~Média~~ — Resolvido                                                                                                                                                                              |
+| **Impacto**            | Médio — com 10+ repos, queries de código ficam diluídas. Qdrant suporta payload filtering no `query()` — filtro por `repo_name` permitiria pesquisa scoped sem coleções separadas                  |
+| **Complexidade**       | Baixa — alteração ao `VectorStore.query()` para aceitar `filters: dict` opcional                                                                                                                   |
+| **Ficheiros afetados** | `obsidian_rag/store/base.py`, `obsidian_rag/store/qdrant_store.py`, `obsidian_rag/store/chroma_store.py`, `obsidian_rag/retrieval/rag.py`, `obsidian_rag/api/app.py`, `obsidian_rag/cli/_query.py` |
+
+**Resolução (2026-05-11):** `VectorStore.query()` Protocol aceita `filters: dict | None = None`. QdrantVectorStore converte para `models.Filter(must=[FieldCondition(...)])`. ChromaVectorStore converte para `where` dict. `/query/code` usa filtros query-time (eliminado filtro pós-retrieval). CLI `rag query --repo X` direciona para `/query/code`. 10 novos testes (2 filter + parametrizados Chroma/Qdrant).
+
+### 8.7 Reranker sequencial — bottleneck de latência
+
+| Campo                  | Detalhe                                                                                                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Prioridade**         | Baixa                                                                                                                                                                                                        |
+| **Impacto**            | Baixo-Médio — reranker chama Ollama **uma vez por chunk candidato** sequencialmente. Com `top_k_candidates=30`, são 30 chamadas HTTP. Paralelizar com ThreadPoolExecutor (I/O-bound) reduziria latência 3-5× |
+| **Complexidade**       | Baixa — mesmo padrão já aplicado em `enrich.py` `summarize_communities()`                                                                                                                                    |
+| **Ficheiros afetados** | `obsidian_rag/retrieval/reranker.py`                                                                                                                                                                         |
+
+**Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #185).
+
+### 8.8 Graphify sem incrementalidade real
+
+| Campo                  | Detalhe                                                                                                                                                                                             |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Prioridade**         | Baixa                                                                                                                                                                                               |
+| **Impacto**            | Baixo-Médio — `build_graph()` faz rebuild por repo inteiro (ou skip total). Com repos grandes (100+ ficheiros), tracking de quais ficheiros mudaram e rebuild parcial reduziria o tempo de graphify |
+| **Complexidade**       | Média — depende do suporte da lib graphifyy para rebuild parcial                                                                                                                                    |
+| **Ficheiros afetados** | `obsidian_rag/graph/builder.py`, `obsidian_rag/pipeline/manifest.py`                                                                                                                                |
+
+**Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #186).
+
+### 8.9 Qdrant embedded vs. server mode para bases grandes
+
+| Campo                  | Detalhe                                                                                                                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Prioridade**         | Baixa                                                                                                                                                                                     |
+| **Impacto**            | Baixo — com >50k chunks, Qdrant embedded fica lento no startup e consome mais RAM. Migrar para server mode (já suportado via `qdrant_url`) dá indexação assíncrona e queries mais rápidas |
+| **Complexidade**       | Baixa — infraestrutura já existe, falta documentação operacional                                                                                                                          |
+| **Ficheiros afetados** | `docker-compose.yml`, documentação                                                                                                                                                        |
+
+**Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #187).
+
+### 8.10 Multi-vault Obsidian
+
+| Campo                  | Detalhe                                                                                                                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Prioridade**         | Baixa                                                                                                                                                                  |
+| **Impacto**            | Baixo — `vault_dir` é singular. Suportar `vault_dirs = [...]` (lista) com coleções separadas por vault permitiria pesquisa scoped (pessoal vs. trabalho vs. projectos) |
+| **Complexidade**       | Média — alteração a `PathsConfig`, `sync_notes()`, `rag.toml`, e lógica de coleções                                                                                    |
+| **Ficheiros afetados** | `obsidian_rag/config.py`, `obsidian_rag/pipeline/sync.py`, `rag.toml`, `obsidian_rag/retrieval/rag.py`                                                                 |
+
+**Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #188).
 
 ---
 
@@ -919,6 +1028,129 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | 168 | ~~`test_dask_engine.py`: testes para factory local/dask, import error handling, integração com IngestPipeline~~                    | Média        | ✅ Concluído |
 
 > **Fase 18 concluída em 2026-05-10.** Engine Dask distribuído opcional (Phase 5). Novo módulo `dask_engine.py` com `DaskParserPool` (drop-in replacement para `ProcessPoolExecutor`) e factory `create_parser_pool()`. Quando `engine = "local"` (default), usa `ProcessPoolExecutor` com `spawn` context e `max_tasks_per_child=100`. Quando `engine = "dask"`, cria `DaskParserPool` que suporta cluster local (auto-criado) ou scheduler remoto (via `dask_scheduler` URL). `IngestPipeline` agora aceita `pipeline_config` para selecção de engine. Dependência opcional: `pip install obsidian-rag[dask]` (`dask[distributed]>=2024.1`). Imports de `ProcessPoolExecutor`/`get_context` movidos de `ingest.py` para `dask_engine.py`. `sync.py` passa `pipeline_config=settings.pipeline` ao pipeline. 6 novos testes em `test_dask_engine.py` (3 skipped se dask não instalado). Total: 329 testes (18 skipped) em 20 ficheiros. Ficheiros afetados: `pipeline/dask_engine.py` (novo), `pipeline/ingest.py`, `pipeline/sync.py`, `config.py`, `rag.toml`, `pyproject.toml`, `tests/test_dask_engine.py` (novo).
+
+---
+
+### Fase 19 — Hotfixes de robustez (v0.5.1, 2026-05-11) ✅
+
+| #   | Tarefa                                                                                                                                                                                              | Complexidade | Estado       |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ |
+| 169 | ~~`qdrant_store.py`: `_is_meta_valid()` — valida se `meta.json` existe e contém JSON válido~~                                                                                                       | Baixa        | ✅ Concluído |
+| 170 | ~~`qdrant_store.py`: `_backup_meta()` — cópia atómica de `meta.json` → `meta.json.bak` via `tempfile` + `os.replace`~~                                                                              | Baixa        | ✅ Concluído |
+| 171 | ~~`qdrant_store.py`: `_recover_meta_if_corrupt()` — restaura de `.bak` se disponível; caso contrário semeia `{"collections": {}, "aliases": {}}` para evitar crash~~                                | Média        | ✅ Concluído |
+| 172 | ~~`qdrant_store.py`: `__init__` chama `_recover_meta_if_corrupt()` ANTES de `QdrantClient(path=...)` e `_backup_meta()` APÓS inicialização bem-sucedida~~                                           | Baixa        | ✅ Concluído |
+| 173 | ~~`ingest.py`: `_cleanup_stale(source)` substituído por `_cleanup_stale_global(all_manifest_ids)` que recolhe union de IDs de todos os repos antes de deletar~~                                     | Média        | ✅ Concluído |
+| 174 | ~~`ingest.py`: `_cleanup_stale(source)` preservado para retrocompatibilidade com testes~~                                                                                                           | Baixa        | ✅ Concluído |
+| 175 | ~~`markdown.py`: `_split_long_text()` — adicionado guard `start = next_start if next_start > start else end` para evitar loop infinito quando `rfind` falha ou retorna boundary próximo do início~~ | Baixa        | ✅ Concluído |
+| 176 | ~~`ingest.py`: parse errors registados com `{e!r}` + `traceback.format_exc()` nos dois code paths (in-process e `_harvest_futures()`)~~                                                             | Baixa        | ✅ Concluído |
+| 177 | ~~`ingest.py`: logs de progresso `[scan]`/`[parse]`/`[embed]`/`[write]` por etapa com contadores~~                                                                                                  | Baixa        | ✅ Concluído |
+
+> **Fase 19 concluída em 2026-05-11.** Três bugs críticos descobertos e corrigidos em produção durante execução de `rag sync --all`.
+>
+> **Bug 1 — `_cleanup_stale` delecia chunks de todos os repos (CRÍTICO):**
+> `_cleanup_stale(source)` era chamada 5× (uma vez por repo). Cada chamada calculava `existing_in_store − this_repo_manifest_ids`, eliminando todos os chunks de todos os outros repos. Após 5 iterações a `code_repos` ficava vazia (0 chunks). Causa: lógica assumia que `get_existing_ids()` só retornava IDs do repo atual, mas retorna IDs de toda a coleção. Correcção: novo método `_cleanup_stale_global(all_manifest_ids)` que recolhe a union de IDs de todos os repos primeiro e corre uma única vez no final. `_cleanup_stale(source)` preservado para compatibilidade com testes. **Impacto:** `code_repos` passou de 0 para 150 chunks após a correcção.
+>
+> **Bug 2 — `_split_long_text` loop infinito em markdown.py (CRÍTICO):**
+> `_split_long_text(text, max_chars, overlap)` entrava em loop infinito ao processar ficheiros Markdown longos (ex: `PROJECT_OVERVIEW.md`, ~10 000 chars). Quando `rfind(". ")` encontrava um boundary muito próximo do `start`, o cálculo `end - overlap` produzia `next_start <= start`. O cursor nunca avançava → loop infinito → `MemoryError()` com `str(e) == ""` → parse error sem mensagem. Correcção: `start = next_start if next_start > start else end`. `PROJECT_OVERVIEW.md` produz agora 114 chunks sem travar.
+>
+> **Bug 3 — Qdrant `meta.json` corrupção no startup (CRÍTICO):**
+> `QdrantClient(path=...)` no modo embedded crashava com `json.decoder.JSONDecodeError` se `meta.json` ficasse truncado (0 bytes) após um processo ser morto a meio de uma escrita. Correcção: `_recover_meta_if_corrupt()` chamado antes da inicialização — verifica se o ficheiro é válido; se não for, tenta restaurar de `meta.json.bak`; se também inválido, semeia `{"collections": {}, "aliases": {}}`. `_backup_meta()` chamado após inicialização bem-sucedida para manter a cópia de segurança actualizada.
+>
+> **Melhoria 4 — Logs de progresso no IngestPipeline:**
+> Cada etapa do pipeline (`[scan]`, `[parse]`, `[embed]`, `[write]`) emite agora prints com contadores. Parse errors incluem `repr(e)` + traceback completo em vez de mensagem vazia. Permite acompanhar `rag sync --all` em tempo real sem depender de debug mode.
+>
+> Ficheiros afetados: `store/qdrant_store.py`, `pipeline/ingest.py`, `chunking/markdown.py`. Testes validados: 34 (`test_vector_store.py`) + 35 (`test_ingest_pipeline.py` + `test_manifest.py`) + 62 (`test_chunking_markdown.py`) — todos passam.
+
+---
+
+### Fase 20 — Escalabilidade para bases de conhecimento maiores (v1.1)
+
+> **Objectivo:** Preparar o obsidian-rag para crescer de centenas para milhares de notas e dezenas de repos, sem degradação de performance ou qualidade de retrieval.
+
+#### Prioridade 1 — Bottlenecks de escala (bloqueantes)
+
+| #   | Tarefa                                                                                                                                                                                                           | Complexidade | Estado       | Ref  |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ---- |
+| 178 | ~~**Migrar `sync_notes()` para `IngestPipeline`**~~ — `sync_notes()` usa agora bounded pipeline 4-estágios com `iter_note_files()` generator. `_sync_chunks_to_store()` removido. `chunk_all_notes()` deprecated | Média        | ✅ Concluído | §8.3 |
+| 179 | ~~**Manifest incremental para notas**~~ — resolvido automaticamente por #178. Notas partilham `manifest.db` com repos sem colisão                                                                                | Baixa        | ✅ Concluído | §8.4 |
+| 180 | ~~**`gc.collect()` entre repos no graphify**~~ — `gc.collect()` adicionado após cada repo em `build_graphs()` (paths sequencial e paralelo)                                                                      | Baixa        | ✅ Concluído | —    |
+| 181 | ~~**`rag doctor` métricas de escala**~~ — nova secção "Escala" no doctor: chunks por coleção, tamanho manifest, VRAM actual, disco (data dir)                                                                    | Baixa        | ✅ Concluído | —    |
+
+#### Prioridade 2 — Qualidade de retrieval a escala
+
+| #   | Tarefa                                                                                                                                                                                                                                      | Complexidade | Estado       | Ref  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ---- |
+| 182 | **Hybrid search (sparse + dense)** — adicionar sparse vectors (BM25-like) ao pipeline de embedding e ao `VectorStore.query()`. Qdrant suporta nativamente `SparseVector`. Requer: tokenizer BM25 local, alteração ao Protocol, query fusion | Média        | Não iniciado | §8.5 |
+| 183 | ~~**Query filtering por metadata**~~ — `VectorStore.query()` aceita `filters: dict` (Qdrant payload filter + ChromaDB `where`). `/query/code` usa filtro query-time por `repo_name`/`symbol_type`. CLI: `rag query --repo X "texto"`        | Baixa        | ✅ Concluído | §8.6 |
+| 184 | ~~**Adaptive top_k por tamanho de coleção**~~ — `_scale_k_by_size()` escala `effective_k` por `1 + log10(size/1000)` quando >1000 chunks. Cache TTL 60s via `_cached_count()`. Bounds: min 3, max 30                                        | Baixa        | ✅ Concluído | —    |
+
+#### Prioridade 3 — Latência e throughput
+
+| #   | Tarefa                                                                                                                                                                                                                              | Complexidade | Estado       | Ref  |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ---- |
+| 185 | **Reranker paralelo** — paralelizar chamadas LLM do reranker com `ThreadPoolExecutor(max_workers=min(3, n))`, mesmo padrão de `enrich.py`. Cada chamada é I/O-bound HTTP. Reduz latência 3-5× com `top_k_candidates=30`             | Baixa        | Não iniciado | §8.7 |
+| 186 | **Graphify incremental por ficheiro** — tracking de ficheiros alterados por repo (via manifest ou hash comparison) e rebuild parcial apenas dos ficheiros modificados. Depende de suporte da lib `graphifyy` para extracção parcial | Média        | Não iniciado | §8.8 |
+
+#### Prioridade 4 — Infraestrutura e funcionalidades futuras
+
+| #   | Tarefa                                                                                                                                                                                                                                 | Complexidade | Estado       | Ref   |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ----- |
+| 187 | **Documentação operacional Qdrant server** — guia para migrar de embedded para server mode quando >50k chunks. Inclui `docker-compose.yml` (já tem profile), configuração de `qdrant_url`, benchmark embedded vs. server               | Baixa        | Não iniciado | §8.9  |
+| 188 | **Multi-vault Obsidian** — suportar `vault_dirs = [...]` em `rag.toml` com coleções separadas por vault. Alteração a `PathsConfig`, `sync_notes()`, lógica de coleções, e queries scoped (`rag query --vault pessoal "texto"`)         | Média        | Não iniciado | §8.10 |
+| 189 | **Ollama env vars no systemd** — automatizar configuração de `OLLAMA_NUM_PARALLEL=2` e `OLLAMA_MAX_LOADED_MODELS=2` via `rag init` ou `rag doctor --fix`. Verifica se as env vars estão definidas no serviço Ollama e sugere correcção | Baixa        | Não iniciado | —     |
+| 190 | **Métricas de sync em dashboard** — exportar métricas do pipeline (chunks/s, tempo por fase, VRAM usage) para ficheiro JSON/Parquet consultável. Possibilidade futura de dashboard web via `/metrics` endpoint                         | Baixa        | Não iniciado | —     |
+
+#### Ordem de execução recomendada
+
+```
+Fase 20 — Plano de execução v1.1
+═══════════════════════════════════════════════════════════════════
+
+Sprint 1 — Fundações de escala (bloqueante)
+──────────────────────────────────────────────────────────────────
+  #178  sync_notes → IngestPipeline        [Média]  ← O mais urgente
+  #179  Manifest incremental p/ notas      [Baixa]  ← resolvido por #178
+  #180  gc.collect() no graphify           [Baixa]  ← fix rápido
+  #181  rag doctor métricas de escala      [Baixa]  ← observabilidade
+
+Sprint 2 — Qualidade de retrieval
+──────────────────────────────────────────────────────────────────
+  #183  Query filtering por metadata       [Baixa]  ✅ Concluído
+  #184  Adaptive top_k por coleção         [Baixa]  ✅ Concluído
+  #182  Hybrid search (sparse + dense)     [Média]  ← maior impacto, mais complexo
+
+Sprint 3 — Latência e throughput
+──────────────────────────────────────────────────────────────────
+  #185  Reranker paralelo                  [Baixa]  ← padrão já provado em enrich.py
+  #186  Graphify incremental               [Média]  ← depende de lib graphifyy
+
+Sprint 4 — Infraestrutura futura
+──────────────────────────────────────────────────────────────────
+  #187  Docs Qdrant server mode            [Baixa]  ← quando >50k chunks
+  #188  Multi-vault Obsidian               [Média]  ← quando vaults múltiplos
+  #189  Ollama env vars automation         [Baixa]  ← DX improvement
+  #190  Métricas de sync em dashboard      [Baixa]  ← observabilidade avançada
+```
+
+#### Dependências entre tarefas
+
+```
+#178 ──→ #179 (manifest automático via IngestPipeline)
+#182 ──→ precisa de #183 implementado primeiro (Protocol query com filters)
+#186 ──→ investigar API da lib graphifyy para extracção parcial
+#188 ──→ precisa de #183 (queries scoped por coleção/vault)
+```
+
+#### O que NÃO entra na v1.1
+
+| Tecnologia              | Razão                                                                                        |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| `sentence-transformers` | Ollama já faz embeddings GPU; duplicar = conflito de VRAM com modelos carregados             |
+| `torch.cuda`            | Sem uso directo de CUDA no projecto; tudo delegado ao Ollama                                 |
+| `Ray` / `Celery`        | Overkill para single-user local; bounded pipeline com backpressure é a arquitectura correcta |
+| `Polars` / `DuckDB`     | SQLite manifest é adequado até ~1M ficheiros; não há ETL tabular pesado                      |
+| `RAPIDS` / `cuDF`       | Zero processamento tabular na GPU; VRAM reservada para modelos LLM                           |
+| `Faiss`                 | Qdrant já resolve busca vectorial; Faiss-GPU competiria por VRAM com Ollama                  |
 
 ---
 

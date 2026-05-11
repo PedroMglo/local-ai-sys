@@ -66,13 +66,46 @@ class IngestSource:
     name: str          # display name (repo name or "vault")
 
 
+def _apply_worker_rlimits() -> None:
+    """Apply resource limits to the current worker process (Unix only).
+
+    Sets RLIMIT_AS (virtual address space) to prevent a single parser
+    from consuming unbounded memory. If the limit is hit, the worker
+    gets a MemoryError — which is caught by the pool — instead of
+    causing system-wide OOM.
+    """
+    try:
+        import resource
+        import psutil
+
+        total_ram = psutil.virtual_memory().total
+        # Allow each worker up to 25% of total RAM
+        worker_limit = total_ram // 4
+        # Set soft = worker_limit, hard = worker_limit (can't be raised)
+        try:
+            resource.setrlimit(resource.RLIMIT_AS, (worker_limit, worker_limit))
+        except (ValueError, OSError):
+            # RLIMIT_AS not supported or already lower — ignore
+            pass
+    except Exception:
+        # Non-Unix or psutil unavailable — skip silently
+        pass
+
+
 def _parse_file_worker(job_path: str, job_repo_dir: str, job_source_type: str) -> list[Chunk]:
     """Worker function for ProcessPoolExecutor — parses a single file into chunks.
 
     This runs in a separate process for memory isolation. Imports are local
     to avoid pickling issues with module-level singletons.
+
+    RLIMIT_AS is set on first call to cap memory per worker process.
     """
     from pathlib import Path as _Path
+
+    # Apply memory limits on first invocation in this process
+    if not getattr(_parse_file_worker, "_rlimits_applied", False):
+        _apply_worker_rlimits()
+        _parse_file_worker._rlimits_applied = True  # type: ignore[attr-defined]
 
     path = _Path(job_path)
     repo_dir = _Path(job_repo_dir)
@@ -104,6 +137,7 @@ class IngestPipeline:
         embed_fn=None,  # optional: callable(list[str]) -> list[list[float]] for testing
         governor=None,  # optional: ResourceGovernor (created automatically if None)
         pipeline_config=None,  # optional: PipelineConfig (engine, dask_scheduler)
+        max_run_seconds: float = 1800,  # global timeout (default 30 min)
     ) -> None:
         from obsidian_rag.pipeline.manifest import IngestManifest
         self._manifest: IngestManifest = manifest
@@ -114,6 +148,7 @@ class IngestPipeline:
         self._governor = governor       # set in run() if None
         self._owns_governor = False      # True when we created the governor
         self._pipeline_config = pipeline_config
+        self._max_run_seconds = max_run_seconds
 
         # Queues with bounded sizes for backpressure
         self._files_queue: Queue = Queue(maxsize=perf.files_queue_max)
@@ -142,6 +177,35 @@ class IngestPipeline:
             self._governor = ResourceGovernor(self._perf, data_dir=data_dir)
             self._owns_governor = True
         self._governor.start()
+
+        # --- Global timeout watchdog ---
+        def _watchdog() -> None:
+            deadline = start + self._max_run_seconds
+            while not self._abort.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    log.error(
+                        "Pipeline watchdog: global timeout (%.0f s) exceeded — aborting",
+                        self._max_run_seconds,
+                    )
+                    print(
+                        f"✗ Pipeline timeout ({self._max_run_seconds:.0f}s) — a abortar de forma segura"
+                    )
+                    self._abort.set()
+                    with self._result_lock:
+                        self._result.errors.append(
+                            f"watchdog: global timeout {self._max_run_seconds:.0f}s exceeded"
+                        )
+                    return
+                # Check every 5 s
+                self._abort.wait(min(5.0, remaining))
+
+        watchdog_thread = threading.Thread(
+            target=_watchdog,
+            name="ingest-watchdog",
+            daemon=True,
+        )
+        watchdog_thread.start()
 
         # Start stages as daemon threads (except parser pool)
         scanner_thread = threading.Thread(
@@ -179,14 +243,18 @@ class IngestPipeline:
         writer_thread.join(timeout=300)
         scanner_thread.join(timeout=10)
 
-        # Handle stale cleanup per source
-        for source in sources:
-            if self._abort.is_set():
-                break
+        # Stale cleanup: collect ALL manifest IDs across ALL sources first,
+        # then delete store entries not present in any source — once.
+        # Per-source cleanup is wrong: existing_in_store − one_repo_ids
+        # removes chunks belonging to every other repo each iteration.
+        if not self._abort.is_set():
             try:
-                self._cleanup_stale(source)
+                all_manifest_ids: set[str] = set()
+                for source in sources:
+                    all_manifest_ids |= self._manifest.get_chunk_ids_for_repo(source.name)
+                self._cleanup_stale_global(all_manifest_ids)
             except Exception as e:
-                log.warning("Stale cleanup error for %s: %s", source.name, e)
+                log.warning("Stale cleanup error: %s", e)
 
         self._result.elapsed_seconds = time.monotonic() - start
 
@@ -227,12 +295,17 @@ class IngestPipeline:
             from obsidian_rag.chunking.markdown import iter_note_files
             file_iter = iter_note_files(source.path)
 
+        print(f"  [scan] {source.name} ({source.path})")
+        source_scanned = 0
+        source_queued = 0
+
         for file_path in file_iter:
             if self._abort.is_set():
                 return
 
             with self._result_lock:
                 self._result.files_scanned += 1
+            source_scanned += 1
 
             # Check if file needs reindexing
             try:
@@ -247,6 +320,9 @@ class IngestPipeline:
             except OSError as e:
                 log.warning("Cannot stat %s: %s", file_path, e)
                 continue
+
+            source_queued += 1
+            log.info("[scan] queuing %s/%s", source.name, rel_path)
 
             job = FileJob(
                 path=str(file_path),
@@ -263,23 +339,32 @@ class IngestPipeline:
                 except Full:
                     continue
 
+        print(f"  [scan] {source.name}: {source_scanned} ficheiros, {source_queued} para processar")
+
     # -- Stage 2: Parser Pool --
 
     def _parser_stage(self) -> None:
-        """Consume FileJobs from files_queue, parse in parallel, feed chunks_queue."""
-        from obsidian_rag.pipeline.dask_engine import create_parser_pool
+        """Consume FileJobs from files_queue, parse in parallel, feed chunks_queue.
 
-        engine = "local"
-        scheduler = ""
-        if self._pipeline_config is not None:
-            engine = self._pipeline_config.engine
-            scheduler = self._pipeline_config.dask_scheduler
+        When parser_workers <= 1, parsing runs in-process (no fork) to avoid
+        the memory spike caused by ProcessPoolExecutor's fork().
+        """
+        use_pool = self._perf.parser_workers > 1
 
-        executor = create_parser_pool(
-            engine=engine,
-            n_workers=self._perf.parser_workers,
-            scheduler_address=scheduler,
-        )
+        if use_pool:
+            from obsidian_rag.pipeline.dask_engine import create_parser_pool
+
+            engine = "local"
+            scheduler = ""
+            if self._pipeline_config is not None:
+                engine = self._pipeline_config.engine
+                scheduler = self._pipeline_config.dask_scheduler
+
+            executor = create_parser_pool(
+                engine=engine,
+                n_workers=self._perf.parser_workers,
+                scheduler_address=scheduler,
+            )
 
         try:
             pending_futures = []
@@ -293,22 +378,72 @@ class IngestPipeline:
                 if job is _DONE:
                     break
 
-                future = executor.submit(
-                    _parse_file_worker,
-                    job.path,
-                    job.repo_dir,
-                    job.source_type,
-                )
-                pending_futures.append((future, job))
+                if use_pool:
+                    future = executor.submit(
+                        _parse_file_worker,
+                        job.path,
+                        job.repo_dir,
+                        job.source_type,
+                    )
+                    pending_futures.append((future, job))
 
-                # Harvest completed futures to avoid unbounded list growth
-                self._harvest_futures(pending_futures)
+                    # Harvest completed futures to avoid unbounded list growth
+                    self._harvest_futures(pending_futures)
+                else:
+                    # In-process parsing — no fork overhead
+                    rel = str(Path(job.path).relative_to(Path(job.repo_dir)))
+                    print(f"  [parse] {job.repo_name}/{rel}")
+                    try:
+                        chunks = _parse_file_worker(job.path, job.repo_dir, job.source_type)
+                    except Exception as e:
+                        import traceback as _tb
+                        log.warning(
+                            "Parse error for %s: %r\n%s",
+                            job.path, e, _tb.format_exc(),
+                        )
+                        print(f"  [parse] ERRO {job.repo_name}/{rel}: {e!r}")
+                        with self._result_lock:
+                            self._result.errors.append(f"parse:{Path(job.path).name}: {e!r}")
+                        continue
 
-            # Drain remaining futures
-            self._harvest_futures(pending_futures, drain=True)
+                    if chunks:
+                        with self._result_lock:
+                            self._result.files_parsed += 1
+                            self._result.chunks_produced += len(chunks)
+                        print(f"  [parse] {job.repo_name}/{rel} → {len(chunks)} chunks")
+
+                        try:
+                            file_path_rel = str(Path(job.path).relative_to(Path(job.repo_dir)))
+                            stat = Path(job.path).stat()
+                            sha = self._manifest.file_sha256(job.path)
+                            self._manifest.record_file(
+                                path=file_path_rel, repo=job.repo_name,
+                                mtime=stat.st_mtime, size=stat.st_size, sha256=sha,
+                                chunk_count=len(chunks),
+                            )
+                            self._manifest.record_chunks(
+                                chunk_ids=[c.id for c in chunks],
+                                file_path=file_path_rel, repo=job.repo_name,
+                                chunk_hashes=[c.id for c in chunks],
+                            )
+                        except Exception as e:
+                            log.warning("Manifest record error for %s: %s", job.path, e)
+
+                        for chunk in chunks:
+                            while not self._abort.is_set():
+                                try:
+                                    self._chunks_queue.put(chunk, timeout=1)
+                                    break
+                                except Full:
+                                    continue
+
+            # Drain remaining futures (only relevant when using pool)
+            if use_pool:
+                self._harvest_futures(pending_futures, drain=True)
 
         finally:
-            executor.shutdown(wait=True, cancel_futures=True)
+            if use_pool:
+                executor.shutdown(wait=True, cancel_futures=True)
             # Signal end of chunks
             self._chunks_queue.put(_DONE)
 
@@ -322,17 +457,25 @@ class IngestPipeline:
                 try:
                     chunks = future.result(timeout=60)
                 except Exception as e:
-                    log.warning("Parse error for %s: %s", job.path, e)
+                    import traceback as _tb
+                    log.warning(
+                        "Parse error for %s: %r\n%s",
+                        job.path, e, _tb.format_exc(),
+                    )
                     with self._result_lock:
-                        self._result.errors.append(f"parse:{Path(job.path).name}: {e}")
+                        self._result.errors.append(f"parse:{Path(job.path).name}: {e!r}")
                     continue
             elif future.done():
                 try:
                     chunks = future.result()
                 except Exception as e:
-                    log.warning("Parse error for %s: %s", job.path, e)
+                    import traceback as _tb
+                    log.warning(
+                        "Parse error for %s: %r\n%s",
+                        job.path, e, _tb.format_exc(),
+                    )
                     with self._result_lock:
-                        self._result.errors.append(f"parse:{Path(job.path).name}: {e}")
+                        self._result.errors.append(f"parse:{Path(job.path).name}: {e!r}")
                     continue
             else:
                 still_pending.append((future, job))
@@ -398,7 +541,7 @@ class IngestPipeline:
         max_chars = self._perf.embedding_batch_max_chars
 
         def flush_batch() -> None:
-            nonlocal batch, batch_chars, batch_start
+            nonlocal batch, batch_chars, batch_start, max_batch
             if not batch:
                 return
 
@@ -407,30 +550,45 @@ class IngestPipeline:
                 action = self._governor.check()
                 if action is GovernorAction.ABORT:
                     log.error("Governor: ABORT — stopping pipeline")
+                    print("✗ Governor: ABORT — pipeline parado por recursos críticos")
                     self._abort.set()
                     batch.clear()
                     batch_chars = 0
                     batch_start = None
                     return
                 if action is GovernorAction.PAUSE:
-                    log.info("Governor: PAUSE — waiting before embedding batch")
+                    snap = self._governor.snapshot()
+                    detail = ""
+                    if snap:
+                        detail = f" (RAM {snap.ram_percent:.0f}%, Swap {snap.swap_percent:.0f}%)"
+                    log.info("Governor: PAUSE%s — waiting before embedding batch", detail)
+                    print(f"⚠ Governor: PAUSE{detail} — aguardando recursos...")
                     action = self._governor.wait_until_safe(timeout=30)
                     if action is GovernorAction.ABORT:
                         log.error("Governor: ABORT after wait — stopping pipeline")
+                        print("✗ Governor: ABORT após espera — pipeline parado")
                         self._abort.set()
                         batch.clear()
                         batch_chars = 0
                         batch_start = None
                         return
+                if action in (GovernorAction.THROTTLE, GovernorAction.REDUCE):
+                    # Reduce batch size dynamically
+                    max_batch = max(5, max_batch // 2)
+                    log.info("Governor: %s — batch reduzido para %d", action.name, max_batch)
 
             try:
                 texts = [c.text for c in batch]
+                repos_in_batch = {c.metadata.get("repo_name", "?") for c in batch if hasattr(c, "metadata")}
+                repo_tag = ",".join(sorted(repos_in_batch)) if repos_in_batch else "?"
+                print(f"  [embed] {len(batch)} chunks ({repo_tag})")
                 embeddings = _embed(texts)
 
                 embedded = EmbeddedBatch(chunks=list(batch), embeddings=embeddings)
 
                 with self._result_lock:
                     self._result.chunks_embedded += len(batch)
+                print(f"  [embed] OK — {self._result.chunks_embedded} embedded total")
 
                 # Block if writer is slow
                 while not self._abort.is_set():
@@ -442,6 +600,7 @@ class IngestPipeline:
 
             except Exception as e:
                 log.error("Embedding error (batch of %d): %s", len(batch), e)
+                print(f"Embedding error (batch of {len(batch)}): {e}")
                 with self._result_lock:
                     self._result.errors.append(f"embed: {e}")
 
@@ -508,6 +667,9 @@ class IngestPipeline:
                     texts = [c.text for c in batch.chunks]
                     metadatas = [c.metadata for c in batch.chunks]
 
+                    repos_in_batch = {m.get("repo_name", "?") for m in metadatas}
+                    repo_tag = ",".join(sorted(repos_in_batch))
+
                     self._store.upsert_batch(
                         ids=ids,
                         embeddings=batch.embeddings,
@@ -521,6 +683,7 @@ class IngestPipeline:
 
                     with self._result_lock:
                         self._result.chunks_stored += len(batch.chunks)
+                    print(f"  [write] {len(batch.chunks)} chunks → store ({repo_tag}) | total: {self._result.chunks_stored}")
 
                 except Exception as e:
                     log.error("Writer error (batch of %d): %s", len(batch.chunks), e)
@@ -533,6 +696,27 @@ class IngestPipeline:
                 self._result.errors.append(f"writer_fatal: {e}")
 
     # -- Stale cleanup --
+
+    def _cleanup_stale_global(self, all_manifest_ids: set[str]) -> None:
+        """Remove from vector store any chunk not present in ANY source manifest.
+
+        Called once after all sources are processed with the union of all
+        manifest IDs.  The per-source variant (_cleanup_stale) must NOT be used
+        for multi-source runs: existing_in_store − one_repo_ids deletes every
+        chunk that belongs to the other repos.
+        """
+        if not all_manifest_ids:
+            return
+
+        existing_in_store = self._store.get_existing_ids(collection=self._collection_name)
+        stale_in_store = existing_in_store - all_manifest_ids
+        if not stale_in_store:
+            return
+
+        deleted = self._store.delete_ids(list(stale_in_store), collection=self._collection_name)
+        with self._result_lock:
+            self._result.stale_deleted += deleted
+        log.info("Deleted %d globally-stale chunks", deleted)
 
     def _cleanup_stale(self, source: IngestSource) -> None:
         """Remove chunks from vector store that no longer exist in the source."""

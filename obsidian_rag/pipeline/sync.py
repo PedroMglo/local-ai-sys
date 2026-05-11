@@ -17,7 +17,6 @@ import argparse
 import os
 from pathlib import Path
 
-from obsidian_rag.chunking.markdown import chunk_all_notes
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import clear_embed_cache
 from obsidian_rag.pipeline.ingest import IngestPipeline, IngestSource
@@ -26,91 +25,6 @@ from obsidian_rag.pipeline.vault_sync import sync_vault
 from obsidian_rag.store.base import create_store
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _sync_chunks_to_store(
-    chunks: list,
-    *,
-    collection: str = "obsidian_vault",
-    verbose: bool = True,
-) -> None:
-    """Incremental sync: embed new chunks, delete stale, upsert via VectorStore."""
-    import time
-
-    from obsidian_rag.embeddings.ollama import embed_texts
-    from obsidian_rag.tuning import should_throttle
-
-    store = create_store()
-    existing_ids = store.get_existing_ids(collection=collection)
-    new_chunk_ids = {c.id for c in chunks}
-
-    # Remove stale chunks
-    stale_ids = existing_ids - new_chunk_ids
-    if stale_ids:
-        store.delete_ids(list(stale_ids), collection=collection)
-        if verbose:
-            print(f"  Removidos {len(stale_ids)} chunks obsoletos")
-
-    # Filter to only new chunks
-    chunks_to_add = [c for c in chunks if c.id not in existing_ids]
-    if not chunks_to_add:
-        if verbose:
-            print("  Nenhum chunk novo para processar.")
-        return
-
-    if verbose:
-        print(f"  A processar {len(chunks_to_add)} chunks novos...")
-
-    total = len(chunks_to_add)
-    processed = 0
-    start_time = time.time()
-    batch_size = settings.performance.embedding_batch_size
-    data_dir = str(settings.paths.data_dir)
-
-    i = 0
-    while i < total:
-        if i > 0:
-            advice = should_throttle(settings.performance, data_dir)
-            if advice.low_disk:
-                print(f"\n  ✗ Disco quase cheio — sync abortado após {processed}/{total} chunks.")
-                return
-            if advice.pause_sync:
-                for attempt in range(1, 4):
-                    print(f"\n  ⚠ Sistema sob pressão: {advice.reason} — pausa {attempt}/3...")
-                    time.sleep(5)
-                    advice = should_throttle(settings.performance, data_dir)
-                    if not advice.pause_sync:
-                        break
-                else:
-                    batch_size = max(5, batch_size // 2)
-                    print(f"  Pressão mantém-se — batch reduzido para {batch_size}")
-            elif advice.reduce_workers:
-                batch_size = max(5, batch_size // 2)
-                if verbose:
-                    print(f"\n  ⚠ Batch reduzido para {batch_size}: {advice.reason}")
-
-        batch = chunks_to_add[i : i + batch_size]
-        texts = [c.text for c in batch]
-        ids = [c.id for c in batch]
-        metadatas = [c.metadata for c in batch]
-
-        embeddings = embed_texts(texts)
-        store.upsert_batch(ids, embeddings, texts, metadatas, collection=collection)
-
-        processed += len(batch)
-        i += len(batch)
-        if verbose:
-            elapsed = time.time() - start_time
-            rate = processed / elapsed if elapsed > 0 else 0
-            print(f"    [{processed}/{total}] {rate:.1f} chunks/s", end="\r")
-
-    if verbose:
-        elapsed = time.time() - start_time
-        print(f"\n  Concluído em {elapsed:.1f}s ({total} chunks)")
-
-
 # ---------------------------------------------------------------------------
 # Sync functions
 # ---------------------------------------------------------------------------
@@ -118,7 +32,11 @@ def _sync_chunks_to_store(
 def sync_notes() -> None:
     """Sincroniza notas Obsidian → vector store (coleção obsidian_vault).
 
-    1. Sync vault → source (or read vault directly, depending on backend)
+    Uses the bounded ingest pipeline: files are scanned via iter_note_files(),
+    parsed into chunks by chunk_note(), embedded in micro-batches, and written
+    to the vector store. Bounded queues between every stage prevent unbounded
+    memory growth. IngestManifest tracks file mtime/size/SHA256 for incremental
+    skip — unchanged notes are not re-processed.
     2. Chunk all .md files
     3. Embed and store via VectorStore protocol
     """
@@ -127,23 +45,32 @@ def sync_notes() -> None:
     # --- Resource protection via governor ---
     gov = ResourceGovernor(settings.performance, data_dir=str(settings.paths.data_dir))
     gov.start()
-    try:
-        action = gov.check()
+
+    action = gov.check()
+    if action is GovernorAction.ABORT:
+        snap = gov.snapshot()
+        reasons = []
+        if snap:
+            reasons.append(f"RAM {snap.ram_percent:.0f}%")
+            if snap.swap_percent > 0:
+                reasons.append(f"Swap {snap.swap_percent:.0f}%")
+        reason = ", ".join(reasons) if reasons else "recursos críticos"
+        print(f"✗ [Notas] {reason} — sync abortado.")
+        gov.stop()
+        return
+    if action is GovernorAction.PAUSE:
+        snap = gov.snapshot()
+        detail = ""
+        if snap:
+            detail = f" (RAM {snap.ram_percent:.0f}%, Swap {snap.swap_percent:.0f}%)"
+        print(f"⚠ [Notas] Sistema sob pressão{detail} — a aguardar recursos...")
+        action = gov.wait_until_safe(timeout=15)
         if action is GovernorAction.ABORT:
-            snap = gov.snapshot()
-            reason = f"RAM {snap.ram_percent:.0f}%" if snap else "recursos críticos"
-            print(f"✗ [Notas] {reason} — sync abortado.")
+            print("✗ [Notas] Recursos críticos após espera — sync abortado.")
+            gov.stop()
             return
         if action is GovernorAction.PAUSE:
-            print("⚠ [Notas] Sistema sob pressão — a aguardar recursos...")
-            action = gov.wait_until_safe(timeout=15)
-            if action is GovernorAction.ABORT:
-                print("✗ [Notas] Recursos críticos após espera — sync abortado.")
-                return
-            if action is GovernorAction.PAUSE:
-                print("    Pressão mantém-se — a continuar com precaução.")
-    finally:
-        gov.stop()
+            print("    Pressão mantém-se — a continuar com precaução.")
 
     clear_embed_cache()
 
@@ -154,17 +81,48 @@ def sync_notes() -> None:
         cfg=settings.sync,
     )
 
-    # Step 2: chunk
-    print("==> [Notas] A fazer chunking das notas Obsidian...")
-    chunks = chunk_all_notes(source_dir=effective_dir)
-    print(f"    Total de chunks: {len(chunks)}")
+    # Step 2: bounded ingest pipeline (scan → parse → embed → store)
+    print("==> [Notas] A processar notas via bounded pipeline...")
 
-    print("==> [Notas] A sincronizar com vector store (obsidian_vault)...")
-    _sync_chunks_to_store(chunks, collection="obsidian_vault")
+    manifest_path = settings.paths.data_dir / "manifest.db"
+    manifest = IngestManifest(manifest_path)
 
     store = create_store()
-    count = store.count(collection="obsidian_vault")
-    print(f"==> [Notas] Store: {count} chunks na coleção 'obsidian_vault'")
+
+    sources = [
+        IngestSource(source_type="vault", path=effective_dir, name="vault"),
+    ]
+
+    pipeline = IngestPipeline(
+        manifest=manifest,
+        perf=settings.performance,
+        store=store,
+        collection_name="obsidian_vault",
+        governor=gov,
+        pipeline_config=settings.pipeline,
+    )
+
+    try:
+        result = pipeline.run(sources)
+    finally:
+        manifest.close()
+        gov.stop()
+
+    # --- Report ---
+    print(f"\n==> [Notas] Pipeline concluído em {result.elapsed_seconds:.1f}s")
+    print(f"    Ficheiros: {result.files_scanned} scanned, {result.files_parsed} parsed, {result.files_skipped} skipped")
+    print(f"    Chunks: {result.chunks_produced} produced, {result.chunks_embedded} embedded, {result.chunks_stored} stored")
+    if result.stale_deleted:
+        print(f"    Removidos: {result.stale_deleted} chunks obsoletos")
+    if result.errors:
+        print(f"    Erros: {len(result.errors)}")
+        for err in result.errors[:5]:
+            print(f"      - {err}")
+        if len(result.errors) > 5:
+            print(f"      ... e mais {len(result.errors) - 5}")
+
+    final_count = store.count(collection="obsidian_vault")
+    print(f"==> [Notas] Store: {final_count} chunks na coleção 'obsidian_vault'")
 
 
 def sync_repos() -> None:
@@ -202,12 +160,21 @@ def sync_repos() -> None:
     action = gov.check()
     if action is GovernorAction.ABORT:
         snap = gov.snapshot()
-        reason = f"RAM {snap.ram_percent:.0f}%" if snap else "recursos críticos"
+        reasons = []
+        if snap:
+            reasons.append(f"RAM {snap.ram_percent:.0f}%")
+            if snap.swap_percent > 0:
+                reasons.append(f"Swap {snap.swap_percent:.0f}%")
+        reason = ", ".join(reasons) if reasons else "recursos críticos"
         print(f"✗ [Repos] {reason} — sync abortado.")
         gov.stop()
         return
     if action is GovernorAction.PAUSE:
-        print("⚠ [Repos] Sistema sob pressão — a aguardar recursos...")
+        snap = gov.snapshot()
+        detail = ""
+        if snap:
+            detail = f" (RAM {snap.ram_percent:.0f}%, Swap {snap.swap_percent:.0f}%)"
+        print(f"⚠ [Repos] Sistema sob pressão{detail} — a aguardar recursos...")
         action = gov.wait_until_safe(timeout=15)
         if action is GovernorAction.ABORT:
             print("✗ [Repos] Recursos críticos após espera — sync abortado.")
@@ -271,11 +238,20 @@ def _wait_for_resources(label: str) -> bool:
         action = gov.check()
         if action is GovernorAction.ABORT:
             snap = gov.snapshot()
-            reason = f"RAM {snap.ram_percent:.0f}%" if snap else "recursos críticos"
+            reasons = []
+            if snap:
+                reasons.append(f"RAM {snap.ram_percent:.0f}%")
+                if snap.swap_percent > 0:
+                    reasons.append(f"Swap {snap.swap_percent:.0f}%")
+            reason = ", ".join(reasons) if reasons else "recursos críticos"
             print(f"✗ [{label}] {reason} — fase seguinte abortada.")
             return False
         if action is GovernorAction.PAUSE:
-            print(f"⚠ [{label}] Sistema sob pressão após fase anterior — a aguardar...")
+            snap = gov.snapshot()
+            detail = ""
+            if snap:
+                detail = f" (RAM {snap.ram_percent:.0f}%, Swap {snap.swap_percent:.0f}%)"
+            print(f"⚠ [{label}] Sistema sob pressão{detail} — a aguardar...")
             action = gov.wait_until_safe(timeout=15)
             if action is GovernorAction.ABORT:
                 print(f"✗ [{label}] Recursos críticos — fase seguinte abortada.")
@@ -289,11 +265,15 @@ def _wait_for_resources(label: str) -> bool:
 
 def sync_local() -> None:
     """Embeddings: notas Obsidian + repos Git (só deltas — sync incremental)."""
+    import gc
+
     sync_notes()
+    gc.collect()  # free chunk lists, ASTs, source code from notes phase
     print()
     if not _wait_for_resources("Transição notas→repos"):
         return
     sync_repos()
+    gc.collect()  # free pipeline objects
 
 
 def sync_graphify(*, force: bool = False) -> None:

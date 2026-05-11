@@ -11,6 +11,7 @@ Os grafos ficam persistidos em:
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import subprocess
@@ -135,27 +136,32 @@ def build_graphs(*, force: bool = False) -> None:
     """Executa graphify extract para todos os repos configurados em rag.toml.
 
     Se *force* for True, faz update mesmo que auto_update=false.
+    Usa ThreadPoolExecutor quando graph_parallel_jobs > 1 (subprocess.run é
+    thread-safe — cada worker espera por um processo isolado).
     """
     if not settings.repos.paths:
         log.info("[Graphify] Sem repos configurados. Skipping.")
         return
 
     model_info = f" | modelo: {settings.graphify.model}" if settings.graphify.model else ""
-    log.info("[Graphify] Backend: %s%s | force: %s", settings.graphify.backend, model_info, force)
+    parallel = settings.performance.graph_parallel_jobs
+    log.info(
+        "[Graphify] Backend: %s%s | force: %s | parallel: %d",
+        settings.graphify.backend, model_info, force, parallel,
+    )
 
     from obsidian_rag.tuning import should_throttle
 
-    successes = 0
-    for repo_path in settings.repos.paths:
-        # Resource check before each repo (graphify is LLM-intensive)
+    def _build_one(repo_path: str) -> bool:
+        """Build a single repo with throttle check and optional VRAM guard."""
         advice = should_throttle(settings.performance, str(settings.paths.data_dir))
         if advice.low_disk:
-            log.error("[Graphify] Disco quase cheio — abortado. %s", advice.reason)
-            break
+            log.error("[Graphify] Disco quase cheio — skipping '%s'. %s", Path(repo_path).name, advice.reason)
+            return False
         if advice.pause_sync:
             import time as _time
             log.warning("[Graphify] Pressão antes de '%s': %s", Path(repo_path).name, advice.reason)
-            for attempt in range(1, 4):
+            for _attempt in range(1, 4):
                 _time.sleep(5)
                 advice = should_throttle(settings.performance, str(settings.paths.data_dir))
                 if not advice.pause_sync:
@@ -163,8 +169,44 @@ def build_graphs(*, force: bool = False) -> None:
             else:
                 log.warning("[Graphify] Pressão mantém-se — a continuar com precaução.")
 
-        if build_graph(repo_path, force=force):
-            successes += 1
+        # VRAM guard: ensure enough free VRAM before launching LLM-intensive subprocess
+        if parallel > 1:
+            try:
+                from obsidian_rag.pipeline.governor import _read_vram
+                _used, total, _pct = _read_vram()
+                free_gb = total - _used if total > 0 else 0
+                if total > 0 and free_gb < 1.5:
+                    import time as _time
+                    log.info(
+                        "[Graphify] VRAM baixa (%.1fGB livre) — aguardando antes de '%s'...",
+                        free_gb, Path(repo_path).name,
+                    )
+                    _time.sleep(10)
+            except Exception:
+                pass  # pynvml unavailable — proceed without guard
+
+        return build_graph(repo_path, force=force)
+
+    if parallel > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        log.info("[Graphify] A processar %d repos em paralelo (max %d workers)...",
+                 len(settings.repos.paths), parallel)
+        successes = 0
+        with ThreadPoolExecutor(max_workers=parallel) as executor:
+            futures = {
+                executor.submit(_build_one, rp): rp
+                for rp in settings.repos.paths
+            }
+            for future in as_completed(futures):
+                if future.result():
+                    successes += 1
+                gc.collect()
+    else:
+        successes = 0
+        for repo_path in settings.repos.paths:
+            if _build_one(repo_path):
+                successes += 1
+            gc.collect()
 
     log.info("[Graphify] %d/%d repos processados.", successes, len(settings.repos.paths))
 

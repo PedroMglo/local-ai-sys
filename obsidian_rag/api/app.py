@@ -152,10 +152,10 @@ def stats():
     )
 
 
-def _query_store(store, collection_name: str, req: QueryRequest) -> list[ChunkResult]:
+def _query_store(store, collection_name: str, req: QueryRequest, *, filters: dict | None = None) -> list[ChunkResult]:
     """Executa query vectorial via VectorStore e devolve ChunkResults."""
     query_embedding = get_query_embedding(req.query)
-    results = store.query(query_embedding, n=req.top_k, collection=collection_name)
+    results = store.query(query_embedding, n=req.top_k, collection=collection_name, filters=filters)
     chunks = []
     for r in results:
         if r.score >= req.min_score:
@@ -228,13 +228,15 @@ def query_code(req: CodeQueryRequest):
 
     start = time.time()
     store = _get_store()
-    chunks = _query_store(store, settings.repos.collection_name, req)
 
-    # Filtros pós-retrieval
+    # Build query-time filters
+    code_filters: dict[str, str] = {}
     if req.repo:
-        chunks = [c for c in chunks if c.repo_name == req.repo]
+        code_filters["repo_name"] = req.repo
     if req.symbol_type:
-        chunks = [c for c in chunks if c.symbol_type == req.symbol_type]
+        code_filters["symbol_type"] = req.symbol_type
+
+    chunks = _query_store(store, settings.repos.collection_name, req, filters=code_filters or None)
 
     elapsed_ms = (time.time() - start) * 1000
     return QueryResponse(results=chunks, query=req.query, elapsed_ms=round(elapsed_ms, 1))

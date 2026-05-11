@@ -4,6 +4,15 @@
 **Severidade:** Crítica — máquina inutilizável, requer hard reset
 **Componente:** `obsidian_rag/pipeline/sync.py` → `sync_repos()`
 **Hardware:** Zorin OS 18.1, 32 GB RAM, 24 threads (i7), RTX 4060 Max-Q 8 GB VRAM
+**Estado:** ✅ RESOLVIDO — Bounded Ingest Pipeline (v0.5.0, 2026-05-10) + hotfixes adicionais (v0.5.1, 2026-05-11)
+
+---
+
+## 0. Estado de resolução
+
+> **O problema descrito neste post-mortem está completamente resolvido.** O freeze da máquina foi eliminado pela reescrita arquitetural do pipeline (Fase 13 — Bounded Ingest Pipeline, v0.5.0, 2026-05-10). Adicionalmente, em 2026-05-11, durante a primeira execução de `rag sync --all` pós-reescrita, foram descobertos e corrigidos 3 bugs críticos adicionais (ver Secção 12).
+>
+> O documento é preservado como referência de arquitectura e para documentar as lições aprendidas.
 
 ---
 
@@ -396,7 +405,7 @@ A solução correcta não é adicionar mais sensores — é **não ter o fogo** 
 
 ---
 
-## 11. Ficheiros alterados
+## 11. Ficheiros alterados (v0.4.1 → v0.5.0)
 
 | Ficheiro                        | Alteração                                                                                                              | Impacto                 |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------- |
@@ -408,3 +417,111 @@ A solução correcta não é adicionar mais sensores — é **não ter o fogo** 
 | `rag.toml`                      | `graph_timeout = 600`                                                                                                  | Configurável            |
 | `scripts/monitor_rag.sh`        | Novo script de monitorização em tempo real                                                                             | Observabilidade         |
 | `tests/test_performance.py`     | Assertions actualizadas para novos valores de auto-tune                                                                | Testes                  |
+
+---
+
+## 12. Bugs adicionais descobertos em produção (v0.5.1, 2026-05-11)
+
+Após a implementação do bounded ingest pipeline (v0.5.0), a primeira execução real de `rag sync --all` em produção revelou 3 bugs críticos adicionais que não foram detectados pelos testes unitários.
+
+### 12.1 `_cleanup_stale` apagava chunks de todos os repos — CRÍTICO
+
+**Sintoma:** Após `rag sync --all` completar com sucesso, a coleção `code_repos` ficava com 0 chunks em vez dos ~150 esperados.
+
+**Causa raiz:**
+```python
+# Código com bug — chamado 5× (uma vez por repo)
+def _cleanup_stale(self, source: IngestSource) -> None:
+    manifest_ids = self._manifest.get_chunk_ids_for_repo(source.name)
+    existing_in_store = self._store.get_existing_ids(self._collection_name)
+    stale = existing_in_store - manifest_ids  # ← ERRADO: subtrai apenas IDs deste repo
+    # → stale inclui chunks de TODOS os outros repos!
+    self._store.delete_ids(self._collection_name, stale)
+```
+
+Em cada iteração, `existing_in_store` continha todos os IDs da coleção (5 repos), enquanto `manifest_ids` continha apenas os IDs do repo atual. A diferença apagava os chunks de todos os outros repos. Após 5 iterações: coleção vazia.
+
+**Correcção:**
+```python
+# Depois da correcção — chamado UMA VEZ após todos os repos
+def _cleanup_stale_global(self, all_manifest_ids: set[str]) -> None:
+    existing_in_store = self._store.get_existing_ids(self._collection_name)
+    stale = existing_in_store - all_manifest_ids  # union de todos os repos
+    if stale:
+        self._store.delete_ids(self._collection_name, stale)
+
+# Em run():
+all_manifest_ids: set[str] = set()
+for source in sources:
+    all_manifest_ids |= self._manifest.get_chunk_ids_for_repo(source.name)
+self._cleanup_stale_global(all_manifest_ids)
+```
+
+**Impacto da correcção:** `code_repos` passou de 0 para 150 chunks.
+
+### 12.2 `_split_long_text` loop infinito em markdown.py — CRÍTICO
+
+**Sintoma:** Parse error silencioso para `PROJECT_OVERVIEW.md` com mensagem vazia (`Parse error for PROJECT_OVERVIEW.md: ''`). O ficheiro não era indexado.
+
+**Causa raiz:**
+```python
+# Código com bug
+def _split_long_text(text, max_chars, overlap):
+    start = 0
+    while start < len(text):
+        end = start + max_chars
+        if end < len(text):
+            cut = text.rfind(". ", start, end)
+            if cut != -1:
+                end = cut + 1
+        chunks.append(text[start:end])
+        start = end - overlap if end < len(text) else end
+        # ↑ BUG: se cut ≈ start, então end - overlap <= start
+        # → start nunca avança → loop infinito → MemoryError("")
+```
+
+Quando `rfind(". ")` encontrava um boundary próximo do início do segmento, `end - overlap` podia ser ≤ `start`. O cursor ficava preso e a lista de chunks crescia indefinidamente até `MemoryError` com `str(e) == ""`.
+
+**Correcção:**
+```python
+next_start = end - overlap if end < len(text) else end
+start = next_start if next_start > start else end  # garante avanço
+```
+
+**Impacto da correcção:** `PROJECT_OVERVIEW.md` produz 114 chunks sem travar. RAM estável.
+
+### 12.3 Qdrant `meta.json` corrupção — CRÍTICO
+
+**Sintoma:** `rag sync --all` crashava imediatamente no startup com `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)` ao inicializar o `QdrantClient` em modo embedded.
+
+**Causa raiz:** `data/qdrant/qdrant/meta.json` ficou com 0 bytes após um processo ser morto no meio de uma escrita (SIGKILL durante graphify).
+
+**Correcção:**
+```python
+def _recover_meta_if_corrupt(qdrant_path: str) -> None:
+    meta = Path(qdrant_path) / "meta.json"
+    if _is_meta_valid(meta):
+        return
+    bak = meta.with_suffix(".json.bak")
+    if _is_meta_valid(bak):
+        shutil.copy2(bak, meta)  # restaurar de backup
+        return
+    # último recurso: semear estrutura mínima válida
+    meta.write_text('{"collections": {}, "aliases": {}}')
+
+# Em __init__:
+_recover_meta_if_corrupt(qdrant_path)          # ANTES de QdrantClient()
+self._client = QdrantClient(path=qdrant_path)
+_backup_meta(qdrant_path)                      # APÓS init bem-sucedido
+```
+
+**Impacto da correcção:** Startup robusto mesmo após kills abruptos.
+
+### 12.4 Ficheiros alterados (v0.5.1)
+
+| Ficheiro                             | Alteração                                                        | Impacto                              |
+| ------------------------------------ | ---------------------------------------------------------------- | ------------------------------------ |
+| `obsidian_rag/pipeline/ingest.py`    | `_cleanup_stale_global()` substitui lógica per-repo             | `code_repos` com 150 chunks (era 0)  |
+| `obsidian_rag/chunking/markdown.py`  | Guard de avanço em `_split_long_text()`                          | Sem loops infinitos em ficheiros longos |
+| `obsidian_rag/store/qdrant_store.py` | `_recover_meta_if_corrupt()` + `_backup_meta()` em `__init__`   | Startup robusto após kills abruptos  |
+| `obsidian_rag/pipeline/ingest.py`    | Logs `[scan]`/`[parse]`/`[embed]`/`[write]` + erros com traceback | Visibilidade em tempo real          |

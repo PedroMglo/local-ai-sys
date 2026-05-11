@@ -55,6 +55,7 @@ def main() -> None:
     p_query.add_argument("query", nargs="+", help="Texto da pergunta")
     p_query.add_argument("-n", "--top-k", type=int, default=5, metavar="N")
     p_query.add_argument("--min-score", type=float, default=0.0, metavar="F")
+    p_query.add_argument("--repo", type=str, default=None, metavar="REPO", help="Filtrar por repo_name")
     p_query.add_argument("--json", action="store_true", help="Saída em JSON")
 
     # --- rag chat ---

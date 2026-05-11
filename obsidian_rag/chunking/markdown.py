@@ -84,7 +84,10 @@ def _split_long_text(text: str, max_chars: int, overlap: int) -> list[str]:
             if cut > start:
                 end = cut + 1
         chunks.append(text[start:end].strip())
-        start = end - overlap if end < len(text) else end
+        # Ensure start always advances: if end - overlap <= start the cut
+        # was too close to start, which would cause an infinite loop.
+        next_start = end - overlap if end < len(text) else end
+        start = next_start if next_start > start else end
 
     return [c for c in chunks if c]
 
@@ -158,6 +161,11 @@ _EXCLUDED_DIRS = frozenset({
 
 def chunk_all_notes(source_dir: Path | None = None) -> list[Chunk]:
     """Processa todas as notas .md no directório indicado.
+
+    .. deprecated:: v1.1
+        Acumula todos os chunks em memória. Usar ``IngestPipeline`` com
+        ``iter_note_files()`` para processamento bounded com backpressure.
+        Mantida apenas para backward compatibility em testes.
 
     Se *source_dir* não for fornecido, usa a pasta efectiva com base
     no backend de sync configurado:

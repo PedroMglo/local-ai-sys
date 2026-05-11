@@ -79,3 +79,57 @@ class TestAdaptiveTopK:
         base_k = 5
         effective = max(3, base_k // 3)
         assert effective == 3
+
+
+class TestScaleKBySize:
+    """Tests for _scale_k_by_size() collection-size scaling."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from obsidian_rag.retrieval.rag import _scale_k_by_size
+        self.scale = _scale_k_by_size
+
+    def test_small_collection_no_scaling(self):
+        """Collections <= 1000 chunks: no scaling."""
+        assert self.scale(10, 500) == 10
+        assert self.scale(10, 1000) == 10
+
+    def test_10k_collection_scales_up(self):
+        """10 000 chunks → factor ~2.0 → k*2."""
+        result = self.scale(10, 10_000)
+        assert result == 20  # 10 * (1 + log10(10)) = 10 * 2 = 20
+
+    def test_100k_collection_capped_at_30(self):
+        """Very large collection: result capped at 30."""
+        result = self.scale(15, 100_000)
+        assert result <= 30
+
+    def test_minimum_is_3(self):
+        """Result never below 3."""
+        result = self.scale(1, 5000)
+        assert result >= 3
+
+    def test_2000_chunks_modest_scaling(self):
+        """2 000 chunks → factor ~1.3 → 10*1.3 ≈ 13."""
+        result = self.scale(10, 2000)
+        assert 10 < result < 20
+
+
+class TestCachedCount:
+    """Tests for _cached_count() TTL behaviour."""
+
+    def test_cache_returns_same_value_within_ttl(self):
+        from obsidian_rag.retrieval.rag import _cached_count, _count_cache
+
+        class FakeStore:
+            def count(self, *, collection="x"):
+                return 42
+
+        _count_cache.clear()
+        assert _cached_count(FakeStore(), "test_col") == 42
+        # Second call should use cache — even if store would return different
+        class ChangedStore:
+            def count(self, *, collection="x"):
+                return 999
+        assert _cached_count(ChangedStore(), "test_col") == 42
+        _count_cache.clear()

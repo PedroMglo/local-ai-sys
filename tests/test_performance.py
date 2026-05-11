@@ -39,6 +39,7 @@ embedding_model = "bge-m3"
             mock_detect.return_value = MagicMock(
                 ram_total_gb=32.0, ram_available_gb=20.0, ram_percent=37.0,
                 cpu_cores=24, cpu_percent=10.0, disk_free_gb=100.0, gpu_nvidia=True,
+                gpu_vram_total_gb=8.0, gpu_vram_free_gb=6.5,
             )
 
             from obsidian_rag.config import load_settings
@@ -46,7 +47,7 @@ embedding_model = "bge-m3"
 
             assert s.performance.auto_tune is True
             assert s.performance.max_cpu_percent == 75
-            assert s.performance.max_memory_percent == 80
+            assert s.performance.max_memory_percent == 70
             assert s.performance.query_timeout_seconds == 30
 
     def test_explicit_values_parsed(self, tmp_path):
@@ -110,10 +111,11 @@ class TestAutoTune:
             mock.return_value = MagicMock(
                 ram_total_gb=32.0, ram_available_gb=20.0, ram_percent=37.0,
                 cpu_cores=24, cpu_percent=10.0, disk_free_gb=100.0, gpu_nvidia=True,
+                gpu_vram_total_gb=8.0, gpu_vram_free_gb=6.5,
             )
             result = auto_tune(perf)
 
-        assert result.embedding_batch_size == 50   # ≥16GB → 50 (conservative)
+        assert result.embedding_batch_size == 50   # ≥6GB VRAM → GPU boost to 50
         assert result.max_parallel_jobs == 4       # 24 // 6 = 4
 
     def test_low_ram_machine(self):
@@ -130,6 +132,7 @@ class TestAutoTune:
             mock.return_value = MagicMock(
                 ram_total_gb=4.0, ram_available_gb=1.5, ram_percent=62.0,
                 cpu_cores=4, cpu_percent=30.0, disk_free_gb=20.0, gpu_nvidia=False,
+                gpu_vram_total_gb=0.0, gpu_vram_free_gb=0.0,
             )
             result = auto_tune(perf)
 
@@ -181,6 +184,7 @@ class TestShouldThrottle:
              patch("obsidian_rag.pipeline.governor.shutil") as mock_shutil:
             mock_psutil.virtual_memory.return_value = self._mock_vmem(37.0, 20.0)
             mock_psutil.cpu_percent.return_value = 30.0
+            mock_psutil.swap_memory.return_value = MagicMock(percent=0.0, used=0, total=6*1024**3, free=6*1024**3)
             mock_shutil.disk_usage.return_value = MagicMock(free=100 * 1024 ** 3)
             advice = should_throttle(perf, data_dir="/tmp")
 
@@ -203,6 +207,7 @@ class TestShouldThrottle:
              patch("obsidian_rag.pipeline.governor.shutil") as mock_shutil:
             mock_psutil.virtual_memory.return_value = self._mock_vmem(78.0, 2.0)
             mock_psutil.cpu_percent.return_value = 30.0
+            mock_psutil.swap_memory.return_value = MagicMock(percent=0.0, used=0, total=6*1024**3, free=6*1024**3)
             mock_shutil.disk_usage.return_value = MagicMock(free=50 * 1024 ** 3)
             advice = should_throttle(perf, data_dir="/tmp")
 
@@ -224,6 +229,7 @@ class TestShouldThrottle:
              patch("obsidian_rag.pipeline.governor.shutil") as mock_shutil:
             mock_psutil.virtual_memory.return_value = self._mock_vmem(72.0, 5.0)
             mock_psutil.cpu_percent.return_value = 30.0
+            mock_psutil.swap_memory.return_value = MagicMock(percent=0.0, used=0, total=6*1024**3, free=6*1024**3)
             mock_shutil.disk_usage.return_value = MagicMock(free=50 * 1024 ** 3)
             advice = should_throttle(perf, data_dir="/tmp")
 
@@ -244,6 +250,7 @@ class TestShouldThrottle:
              patch("obsidian_rag.pipeline.governor.shutil") as mock_shutil:
             mock_psutil.virtual_memory.return_value = self._mock_vmem(37.0, 20.0)
             mock_psutil.cpu_percent.return_value = 30.0
+            mock_psutil.swap_memory.return_value = MagicMock(percent=0.0, used=0, total=6*1024**3, free=6*1024**3)
             mock_shutil.disk_usage.return_value = MagicMock(free=int(0.5 * 1024 ** 3))
             advice = should_throttle(perf, data_dir="/tmp")
 
@@ -287,6 +294,7 @@ auto_tune = true
             mock.return_value = MagicMock(
                 ram_total_gb=16.0, ram_available_gb=8.0, ram_percent=50.0,
                 cpu_cores=4, cpu_percent=20.0, disk_free_gb=50.0, gpu_nvidia=False,
+                gpu_vram_total_gb=0.0, gpu_vram_free_gb=0.0,
             )
 
             from obsidian_rag.config import load_settings

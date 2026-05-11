@@ -99,12 +99,23 @@ class ChromaVectorStore:
         n: int = 10,
         *,
         collection: str = "obsidian_vault",
+        filters: dict | None = None,
     ) -> list[QueryResult]:
         col = self._col(collection)
+
+        where = None
+        if filters:
+            if len(filters) == 1:
+                k, v = next(iter(filters.items()))
+                where = {k: {"$eq": v}}
+            else:
+                where = {"$and": [{k: {"$eq": v}} for k, v in filters.items()]}
+
         results = col.query(
             query_embeddings=[embedding],  # type: ignore[arg-type]
             n_results=n,
             include=["documents", "metadatas", "distances"],
+            where=where,
         )
         if not results["ids"] or not results["ids"][0]:
             return []

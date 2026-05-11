@@ -179,6 +179,30 @@ class TestQuery:
         assert len(results) >= 1
         assert results[0].id == "self-0"
 
+    def test_query_with_filter_narrows_results(self, store):
+        """filters= should restrict results to matching metadata."""
+        ids = [f"filt-{i}" for i in range(4)]
+        embs = [_vec(0.1 * (i + 1)) for i in range(4)]
+        docs = [f"Doc {i}" for i in range(4)]
+        metas = [
+            {"repo_name": "alpha", "lang": "py"},
+            {"repo_name": "beta", "lang": "py"},
+            {"repo_name": "alpha", "lang": "rs"},
+            {"repo_name": "beta", "lang": "rs"},
+        ]
+        store.upsert_batch(ids, embs, docs, metas, collection="test_filter")
+
+        results = store.query(_vec(0.1), n=10, collection="test_filter", filters={"repo_name": "alpha"})
+        assert all(r.metadata.get("repo_name") == "alpha" for r in results)
+        assert len(results) == 2
+
+    def test_query_filters_none_returns_all(self, store):
+        """filters=None should return all results (no restriction)."""
+        ids, embs, docs, metas = _sample_batch(3, "nofilt")
+        store.upsert_batch(ids, embs, docs, metas, collection="test_nofilt")
+        results = store.query(_vec(0.1), n=10, collection="test_nofilt", filters=None)
+        assert len(results) == 3
+
 
 class TestCollectionIsolation:
 

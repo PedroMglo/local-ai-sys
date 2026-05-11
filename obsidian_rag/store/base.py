@@ -81,8 +81,15 @@ class VectorStore(Protocol):
         n: int = 10,
         *,
         collection: str = "obsidian_vault",
+        filters: dict | None = None,
     ) -> list[QueryResult]:
-        """Return the *n* nearest neighbours for *embedding*."""
+        """Return the *n* nearest neighbours for *embedding*.
+
+        Args:
+            filters: Optional metadata filter — ``{"field": "value"}`` for
+                     equality matching.  Translated to backend-specific syntax
+                     (Qdrant ``FieldCondition`` / ChromaDB ``where``).
+        """
         ...
 
     def count(self, *, collection: str = "obsidian_vault") -> int:

@@ -75,6 +75,36 @@ def _reset_collections():
         _store = None
 
 
+# === Collection-size cache (TTL 60 s) ===
+import math as _math
+import time as _time
+
+_count_cache: dict[str, tuple[int, float]] = {}
+_COUNT_TTL = 60.0
+
+
+def _cached_count(store: VectorStore, collection: str) -> int:
+    """Return collection size with 60 s TTL caching."""
+    now = _time.monotonic()
+    cached = _count_cache.get(collection)
+    if cached is not None and now - cached[1] < _COUNT_TTL:
+        return cached[0]
+    try:
+        n = store.count(collection=collection)
+    except Exception:
+        n = 0
+    _count_cache[collection] = (n, now)
+    return n
+
+
+def _scale_k_by_size(base_k: int, collection_size: int) -> int:
+    """Scale effective_k by log10(size / 1000) when collection > 1000."""
+    if collection_size <= 1000:
+        return base_k
+    factor = 1.0 + _math.log10(collection_size / 1000)
+    return max(3, min(30, int(base_k * factor)))
+
+
 # === Helpers ===
 
 def _is_navigation_chunk(meta: dict, doc: str) -> bool:
@@ -117,10 +147,10 @@ def _estimate_complexity(query: str) -> str:
     return "normal"
 
 
-def _search_chroma(store: VectorStore, query_text: str, n: int, *, collection: str = "obsidian_vault") -> list[tuple[str, dict, float]]:
+def _search_chroma(store: VectorStore, query_text: str, n: int, *, collection: str = "obsidian_vault", filters: dict | None = None) -> list[tuple[str, dict, float]]:
     """Vector search via the VectorStore protocol."""
     embedding = get_query_embedding(query_text)
-    results = store.query(embedding, n=min(n * 3, 50), collection=collection)
+    results = store.query(embedding, n=min(n * 3, 50), collection=collection, filters=filters)
     return [(r.document, r.metadata, r.score) for r in results]
 
 
@@ -241,6 +271,16 @@ def build_rag_context(
         effective_k = min(cfg.top_k * 2, 20)
     else:
         effective_k = cfg.top_k
+
+    # Scale by collection size (when > 1000 chunks)
+    store = _get_store()
+    if intent.use_notes:
+        col_size = _cached_count(store, "obsidian_vault")
+        effective_k = _scale_k_by_size(effective_k, col_size)
+    elif intent.use_code and settings.repos.paths:
+        col_size = _cached_count(store, settings.repos.collection_name)
+        effective_k = _scale_k_by_size(effective_k, col_size)
+
     trace.effective_top_k = effective_k
 
     # Strategies 1-2: Notas Obsidian (vector search + keyword variant)
