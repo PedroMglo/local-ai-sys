@@ -61,6 +61,7 @@ class PathsConfig:
     source_dir: Path
     data_dir: Path
     vault_dir: Path
+    vault_dirs: tuple[Path, ...]  # multi-vault support (includes vault_dir)
 
 
 @dataclass(frozen=True)
@@ -237,10 +238,21 @@ def load_settings() -> Settings:
     raw = _load_toml()
 
     p = raw.get("paths", {})
+    vault_dir = _resolve_path(_env_override("paths", "vault_dir", p.get("vault_dir", "~/Obsidian/Vault")))
+
+    # Multi-vault: vault_dirs list (if present) takes precedence;
+    # otherwise fall back to [vault_dir] for backward compat.
+    raw_vault_dirs = p.get("vault_dirs", [])
+    if raw_vault_dirs:
+        vault_dirs = tuple(_resolve_path(vd) for vd in raw_vault_dirs)
+    else:
+        vault_dirs = (vault_dir,)
+
     paths = PathsConfig(
         source_dir=_resolve_path(_env_override("paths", "source_dir", p.get("source_dir", "source"))),
         data_dir=_resolve_path(_env_override("paths", "data_dir", p.get("data_dir", "data/qdrant"))),
-        vault_dir=_resolve_path(_env_override("paths", "vault_dir", p.get("vault_dir", "~/Obsidian/Vault"))),
+        vault_dir=vault_dir,
+        vault_dirs=vault_dirs,
     )
 
     o = raw.get("ollama", {})

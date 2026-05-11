@@ -29,16 +29,16 @@ from obsidian_rag.store.base import create_store
 # Sync functions
 # ---------------------------------------------------------------------------
 
-def sync_notes() -> None:
+def sync_notes(*, vault_filter: str | None = None) -> None:
     """Sincroniza notas Obsidian → vector store (coleção obsidian_vault).
 
-    Uses the bounded ingest pipeline: files are scanned via iter_note_files(),
-    parsed into chunks by chunk_note(), embedded in micro-batches, and written
-    to the vector store. Bounded queues between every stage prevent unbounded
-    memory growth. IngestManifest tracks file mtime/size/SHA256 for incremental
-    skip — unchanged notes are not re-processed.
-    2. Chunk all .md files
-    3. Embed and store via VectorStore protocol
+    Supports multiple vaults via ``settings.paths.vault_dirs``.
+    Each vault's chunks are tagged with ``vault_name`` metadata for
+    query-time filtering.
+
+    Args:
+        vault_filter: If set, sync only the vault whose directory name
+                      matches (case-insensitive).
     """
     from obsidian_rag.pipeline.governor import GovernorAction, ResourceGovernor
 
@@ -74,24 +74,43 @@ def sync_notes() -> None:
 
     clear_embed_cache()
 
-    # Step 1: resolve effective notes directory via sync backend
-    effective_dir = sync_vault(
-        vault_dir=settings.paths.vault_dir,
-        source_dir=settings.paths.source_dir,
-        cfg=settings.sync,
-    )
+    # Resolve vault directories (multi-vault support)
+    vault_dirs = settings.paths.vault_dirs
+    if vault_filter:
+        vault_dirs = tuple(
+            vd for vd in vault_dirs
+            if vd.name.lower() == vault_filter.lower()
+        )
+        if not vault_dirs:
+            print(f"✗ Vault '{vault_filter}' não encontrado em vault_dirs.")
+            gov.stop()
+            return
 
-    # Step 2: bounded ingest pipeline (scan → parse → embed → store)
-    print("==> [Notas] A processar notas via bounded pipeline...")
+    # Build IngestSource per vault
+    sources: list[IngestSource] = []
+    for vault_dir in vault_dirs:
+        effective_dir = sync_vault(
+            vault_dir=vault_dir,
+            source_dir=settings.paths.source_dir,
+            cfg=settings.sync,
+        )
+        vault_name = vault_dir.name
+        sources.append(
+            IngestSource(source_type="vault", path=effective_dir, name=vault_name),
+        )
+
+    if not sources:
+        print("⚠ [Notas] Nenhum vault configurado.")
+        gov.stop()
+        return
+
+    vault_names = ", ".join(s.name for s in sources)
+    print(f"==> [Notas] A processar {len(sources)} vault(s): {vault_names}")
 
     manifest_path = settings.paths.data_dir / "manifest.db"
     manifest = IngestManifest(manifest_path)
 
     store = create_store()
-
-    sources = [
-        IngestSource(source_type="vault", path=effective_dir, name="vault"),
-    ]
 
     pipeline = IngestPipeline(
         manifest=manifest,
@@ -263,11 +282,11 @@ def _wait_for_resources(label: str) -> bool:
     return True
 
 
-def sync_local() -> None:
+def sync_local(*, vault_filter: str | None = None) -> None:
     """Embeddings: notas Obsidian + repos Git (só deltas — sync incremental)."""
     import gc
 
-    sync_notes()
+    sync_notes(vault_filter=vault_filter)
     gc.collect()  # free chunk lists, ASTs, source code from notes phase
     print()
     if not _wait_for_resources("Transição notas→repos"):
@@ -287,7 +306,7 @@ def sync_graphify(*, force: bool = False) -> None:
         print("==> [Graphify] Desabilitado em rag.toml [graphify] enabled = false. Skipping.")
         return
     try:
-        from obsidian_rag.graph.builder import build_graphs
+        from obsidian_rag.pipeline.graph.builder import build_graphs
         build_graphs(force=force)
     except ImportError:
         print("==> [Graphify] graphifyy não está instalado. Instala com: pip install graphifyy")
@@ -299,14 +318,14 @@ def sync_graphify(*, force: bool = False) -> None:
     # Exportar grafos para o vault Obsidian
     print()
     try:
-        from obsidian_rag.graph.obsidian_export import export_all
+        from obsidian_rag.pipeline.graph.obsidian_export import export_all
         export_all(force=force)
     except Exception as e:
         print(f"==> [Obsidian] Erro na exportação para o vault (não fatal): {e}")
 
     # Invalidar cache do grafo para que o RAG use dados actualizados
     try:
-        from obsidian_rag.graph.cache import graph_cache
+        from obsidian_rag.pipeline.graph.cache import graph_cache
         graph_cache.invalidate()
         print("==> [GraphCache] Cache invalidada — próximo chat usará dados actualizados.")
     except Exception:

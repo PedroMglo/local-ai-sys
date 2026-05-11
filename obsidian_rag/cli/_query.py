@@ -19,9 +19,12 @@ def run_query(args: Namespace) -> None:
     endpoint = "/query"
 
     repo = getattr(args, "repo", None)
+    vault = getattr(args, "vault", None)
     if repo:
         endpoint = "/query/code"
         payload["repo"] = repo
+    if vault:
+        payload["vault"] = vault
 
     try:
         resp = httpx.post(

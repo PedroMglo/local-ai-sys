@@ -46,6 +46,7 @@ def main() -> None:
     sync_group.add_argument("-g", "--graph", action="store_true", help="Grafos Graphify")
     sync_group.add_argument("--all", action="store_true", dest="run_all", help="Tudo: embeddings + grafos")
     p_sync.add_argument("--force", action="store_true", help="Rebuild completo do grafo")
+    p_sync.add_argument("--vault", metavar="NAME", help="Sincronizar apenas este vault (nome do directório)")
 
     # --- rag serve ---
     sub.add_parser("serve", help="Iniciar API REST (porta 8484)")
@@ -56,6 +57,7 @@ def main() -> None:
     p_query.add_argument("-n", "--top-k", type=int, default=5, metavar="N")
     p_query.add_argument("--min-score", type=float, default=0.0, metavar="F")
     p_query.add_argument("--repo", type=str, default=None, metavar="REPO", help="Filtrar por repo_name")
+    p_query.add_argument("--vault", type=str, default=None, metavar="NAME", help="Filtrar por vault")
     p_query.add_argument("--json", action="store_true", help="Saída em JSON")
 
     # --- rag chat ---
@@ -117,12 +119,13 @@ def main() -> None:
 
     elif args.command == "sync":
         from obsidian_rag.pipeline.sync import sync_graphify, sync_local
+        vault = getattr(args, "vault", None)
         if args.local:
-            sync_local()
+            sync_local(vault_filter=vault)
         elif args.graph:
             sync_graphify(force=args.force)
         elif args.run_all:
-            sync_local()
+            sync_local(vault_filter=vault)
             print()
             sync_graphify(force=args.force)
 

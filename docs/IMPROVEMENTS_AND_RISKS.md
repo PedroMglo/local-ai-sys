@@ -1,6 +1,6 @@
 # IMPROVEMENTS AND RISKS — obsidian-rag
 
-> **Versão:** 0.5.3 → v1.1 (plano)
+> **Versão:** 0.5.2 → v1.1 (plano)
 > **Última atualização:** 2026-05-11
 > **Âmbito:** Análise crítica de falhas, riscos, melhorias e roadmap
 
@@ -33,7 +33,7 @@
 | **Complexidade**       | Média                                                                 |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`                                            |
 
-**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 386 testes (3 skipped) em 22 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 20 para BM25 sparse + 9 para hybrid search). Faltam integration tests e2e com Ollama.
+**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 416 testes (3 skipped) em 21 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 18 para graphify incremental). Faltam integration tests e2e com Ollama.
 
 ### 1.2 ~~Singletons mutáveis para coleções do vector store~~ ✅ RESOLVIDO
 
@@ -144,7 +144,7 @@
 
 **Resolução (2026-05-10):** Configurados `mypy>=1.10` e `ruff>=0.4` como dependências de desenvolvimento. `[tool.mypy]` (python_version=3.11, ignore_missing_imports=true) e `[tool.ruff]` (line-length=120, select E/F/W/I) adicionados ao `pyproject.toml`.
 
-**Atualização (2026-05-11):** Corrigidos 15 erros de tipo reportados por mypy em 6 ficheiros: `manifest.py` (no-any-return), `governor.py` (IO[str] | None annotation), `treesitter.py` (variável `lang_module` para evitar conflito de tipo), `migrate_cmd.py` (dict(m) para converter Mapping→dict) e `app.py` (type: ignore[dict-item], store.\_models, int(result.count)). `mypy obsidian_rag/` reporta 0 erros. **Atualização v0.5.2:** `chroma_store.py` eliminado, reduzindo ficheiros com type ignores.
+**Atualização (2026-05-11):** Corrigidos 15 erros de tipo reportados por mypy em 6 ficheiros: `manifest.py` (no-any-return), `governor.py` (IO[str] | None annotation), `treesitter.py` (variável `lang_module` para evitar conflito de tipo), `migrate_cmd.py` (dict(m) para converter Mapping→dict) e `app.py` (type: ignore[dict-item], store.\_models, int(result.count)). `mypy obsidian_rag/` reporta 0 erros. **Atualização v0.5.2:** `chroma_store.py` eliminado, reduzindo ficheiros com type ignores. **Atualização (2026-05-11b):** Corrigidos erros `attr-defined` em `retrieval/rag.py` — `_bm25_cache` tipado como `dict[str, BM25Vectorizer | None]` em vez de `dict[str, object]`. Adicionado hook `mypy` no pre-commit stage via `.pre-commit-config.yaml` para garantir zero erros de tipo antes de cada commit.
 
 ### 3.2 ~~Sem linter/formatter configurado~~ ✅ RESOLVIDO
 
@@ -155,7 +155,7 @@
 | **Complexidade**       | Baixa                                            |
 | **Ficheiros afetados** | `pyproject.toml`                                 |
 
-**Resolução (2026-05-10):** `ruff>=0.4` configurado em `[tool.ruff]` com `line-length=120`, `select=["E","F","W","I"]`. Adicionado como dependência de desenvolvimento em `pyproject.toml`.
+**Resolução (2026-05-10):** `ruff>=0.4` configurado em `[tool.ruff]` com `line-length=120`, `select=["E","F","W","I"]`. Adicionado como dependência de desenvolvimento em `pyproject.toml`. **Atualização (2026-05-11b):** Corrigidos erros I001 (import sorting) em `retrieval/rag.py` (imports movidos para top-level) e `pipeline/ingest.py`. Adicionado hook `ruff` no pre-commit stage (só `obsidian_rag/`) via `.pre-commit-config.yaml`.
 
 ### 3.3 ~~Sem CI/CD pipeline~~ ✅ RESOLVIDO
 
@@ -173,6 +173,13 @@
 - **`release.yml`** — Trigger em tags `v*`, reutiliza CI, build wheel/sdist, GitHub Release automático, Docker image build
 
 Triggers: push/PR na branch main. Sem dependências de Ollama, GPU, rsync ou systemd. `Makefile` com targets `lint`, `typecheck`, `test-cov`, `ci`, `docker-build`, `docker-check`. `pyproject.toml` com `pytest-cov>=5.0` e `types-requests>=2.31` nas dev extras.
+
+**Atualização (2026-05-11b):** Adicionados **pre-commit hooks** (`.pre-commit-config.yaml`) que espelham o CI pipeline localmente, prevenindo falhas em PRs:
+
+- **Pre-commit stage:** `ruff check obsidian_rag/` (lint) + `mypy obsidian_rag/` (type-check)
+- **Pre-push stage:** `pytest` com coverage gate `--cov-fail-under=30`
+
+`pre-commit>=3.2` adicionado a `[project.optional-dependencies] dev` em `pyproject.toml`. Instalação: `pre-commit install --hook-type pre-commit --hook-type pre-push`.
 
 ### 3.4 ~~Versão hardcoded em múltiplos locais~~ ✅ RESOLVIDO
 
@@ -498,28 +505,16 @@ A arquitetura é single-process (uvicorn sem workers configurados). O httpx pool
 
 **Resolução (2026-05-11):** Resolvido automaticamente pela migração de `sync_notes()` para o `IngestPipeline` (§8.3). Notas partilham o mesmo `manifest.db` que os repos — sem colisão porque `source.name` é diferente ("vault" vs nome do repo). Na primeira execução pós-migração, todas as notas são reprocessadas (manifest vazio para vault); em execuções subsequentes, apenas ficheiros alterados são reprocessados via `mtime/size/SHA256`.
 
-### 8.5 ~~Retrieval perde precisão a escala — falta hybrid search~~ ✅ RESOLVIDO
+### 8.5 Retrieval perde precisão a escala — falta hybrid search
 
 | Campo                  | Detalhe                                                                                                                                                                                                           |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Prioridade**         | ~~Média~~ — Resolvido                                                                                                                                                                                             |
+| **Prioridade**         | Média                                                                                                                                                                                                             |
 | **Impacto**            | Médio — com >5000 chunks, pesquisa puramente vectorial perde precisão para termos técnicos exactos (nomes de funções, variáveis, erros). Qdrant suporta nativamente sparse vectors (BM25-like) para hybrid search |
 | **Complexidade**       | Média — requer sparse embedding + alteração ao `VectorStore` protocol + query fusion                                                                                                                              |
-| **Ficheiros afetados** | `obsidian_rag/store/base.py`, `obsidian_rag/store/qdrant_store.py`, `obsidian_rag/retrieval/rag.py`, `obsidian_rag/retrieval/sparse.py` (novo), `obsidian_rag/pipeline/ingest.py`                                 |
+| **Ficheiros afetados** | `obsidian_rag/store/base.py`, `obsidian_rag/store/qdrant_store.py`, `obsidian_rag/retrieval/rag.py`                                                                                                               |
 
-**Resolução (2026-05-11 — #182, v0.5.3):** Implementado hybrid search completo com BM25 sparse vectors + dense vectors via Qdrant Prefetch + RRF (Reciprocal Rank Fusion).
-
-**Componentes implementados:**
-
-1. **`retrieval/sparse.py` (novo):** `BM25Vectorizer` class — implementação custom Okapi BM25 (~150 linhas). `tokenize()` com whitespace + accent-stripping. Parâmetros standard k1=1.5, b=0.75. Ciclo de vida fit/transform/save/load. Persistência JSON em `data/qdrant/bm25/{collection}.json`. Zero dependências externas.
-2. **`store/qdrant_store.py`:** `_ensure_collection()` cria coleções com `sparse_vectors_config={"bm25": SparseVectorParams()}`. Coleções existentes recebem o índice sparse via `update_collection()`. `upsert_batch()` aceita `sparse_vectors: list[dict] | None`. `query()` aceita `sparse_query: dict | None` e usa Qdrant Prefetch (dense + sparse) com RRF quando fornecido.
-3. **`store/base.py`:** `VectorStore` Protocol atualizado: `upsert_batch()` com param `sparse_vectors`, `query()` com param `sparse_query`.
-4. **`pipeline/ingest.py`:** Pós-ingest, `_rebuild_bm25_index()` faz scroll de todos os documentos da coleção, fita BM25, guarda modelo em `data/qdrant/bm25/{collection}.json`, e upserts sparse vectors para todos os docs.
-5. **`retrieval/rag.py`:** `_vector_search()` carrega modelo BM25 do disco, tokeniza query (com stop-word removal), gera sparse query vector, passa dense + sparse ao `store.query()`. `_get_sparse_query()` helper com cache por coleção. Fallback gracioso para dense-only quando modelo BM25 não existe.
-
-**Arquitectura:** Modelo BM25 fitado pós-ingest por scroll de todos os docs. Persistido como JSON. At query time, modelo carregado uma vez e cacheado por coleção. Hybrid search via Qdrant Prefetch + RRF nativo. Zero novas dependências, zero VRAM. Backward compatible: fallback dense-only quando modelo BM25 não existe.
-
-**Testes:** 20 testes em `test_sparse.py` (tokenizer, fit, transform, persistência, custom params) + 9 novos testes em `test_vector_store.py` (upsert com sparse, hybrid query com RRF, fallback dense-only). Total: 386 passed, 3 skipped.
+**Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #182).
 
 ### 8.6 ~~Queries de código diluídas — falta filtering por metadata~~ ✅ RESOLVIDO
 
@@ -543,27 +538,38 @@ A arquitetura é single-process (uvicorn sem workers configurados). O httpx pool
 
 **Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #185).
 
-### 8.8 Graphify sem incrementalidade real
+### 8.8 ~~Graphify sem incrementalidade real~~ ✅ RESOLVIDO
 
-| Campo                  | Detalhe                                                                                                                                                                                             |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                                                                                                                                                               |
-| **Impacto**            | Baixo-Médio — `build_graph()` faz rebuild por repo inteiro (ou skip total). Com repos grandes (100+ ficheiros), tracking de quais ficheiros mudaram e rebuild parcial reduziria o tempo de graphify |
-| **Complexidade**       | Média — depende do suporte da lib graphifyy para rebuild parcial                                                                                                                                    |
-| **Ficheiros afetados** | `obsidian_rag/graph/builder.py`, `obsidian_rag/pipeline/manifest.py`                                                                                                                                |
+| Campo                  | Detalhe                                                                                                                                                                                               |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                                                                                                                                                                 |
+| **Impacto**            | Baixo-Médio — `build_graph()` fazia rebuild por repo inteiro (ou skip total). Com repos grandes (100+ ficheiros), tracking de quais ficheiros mudaram e rebuild parcial reduziria o tempo de graphify |
+| **Complexidade**       | Média                                                                                                                                                                                                 |
+| **Ficheiros afetados** | `obsidian_rag/graph/builder.py`, `tests/test_graphify_incremental.py`                                                                                                                                 |
 
-**Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #186).
+**Resolução (2026-05-11 — #186):** Implementado modo incremental 3-tier em `build_graph()`:
 
-### 8.9 Qdrant embedded vs. server mode para bases grandes
+1. **`_file_md5(path)`** — calcula MD5 hash no formato do manifest do graphify
+2. **`_detect_changes(repo_path, manifest_path)`** — lê `manifest.json` do graphify (file_path → {mtime, hash}), compara hashes contra ficheiros actuais, detecta ficheiros novos (ausentes do manifest). Retorna `(has_changes, has_doc_changes)`
+3. **`_DOC_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".adoc"})`** — extensões que requerem extração semântica LLM
+4. **Lógica 3-tier:**
+   - Sem alterações → skip subprocess (sem `graphify` call)
+   - Só código alterado (.py, .js, etc.) → `graphify update` (AST-only, sem LLM, rápido)
+   - Docs alterados (.md, .txt, etc.) → `graphify extract` (AST + LLM semântico completo)
+5. **`force=True`** bypassa detecção e executa sempre `graphify extract`
+
+**Impacto:** Elimina subprocess desnecessários para repos sem alterações. Evita chamadas LLM quando só código mudou. Backward compatible. Sem novas dependências. 18 novos testes em `test_graphify_incremental.py`. Total: 416 testes (3 skipped).
+
+### 8.9 ~~Qdrant embedded vs. server mode para bases grandes~~ ✅ RESOLVIDO
 
 | Campo                  | Detalhe                                                                                                                                                                                   |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Prioridade**         | Baixa                                                                                                                                                                                     |
+| **Prioridade**         | ~~Baixa~~ — Resolvido                                                                                                                                                                     |
 | **Impacto**            | Baixo — com >50k chunks, Qdrant embedded fica lento no startup e consome mais RAM. Migrar para server mode (já suportado via `qdrant_url`) dá indexação assíncrona e queries mais rápidas |
-| **Complexidade**       | Baixa — infraestrutura já existe, falta documentação operacional                                                                                                                          |
-| **Ficheiros afetados** | `docker-compose.yml`, documentação                                                                                                                                                        |
+| **Complexidade**       | Baixa — infraestrutura já existe, falta documentación operacional                                                                                                                         |
+| **Ficheiros afetados** | `docker-compose.yml`, `docs/QDRANT_SERVER_MODE.md`                                                                                                                                        |
 
-**Estado:** Aberto — planeado para v1.1 (Fase 20, tarefa #187).
+**Resolução (2026-05-11 — #187):** Criado guia operacional completo em `docs/QDRANT_SERVER_MODE.md` cobrindo: critérios de migração (>50k chunks, acesso concorrente), setup via Docker Compose (`docker compose --profile qdrant up`), configuração em `rag.toml` (`qdrant_url`, `qdrant_api_key`), métodos de migração de dados (re-sync vs snapshots), passos de verificação, procedimento de rollback, tabela comparativa embedded vs server, e notas de segurança (API key quando exposto na LAN). Tarefa documental — sem alterações de código.
 
 ### 8.10 Multi-vault Obsidian
 
@@ -616,7 +622,7 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | **Complexidade**       | Média                                  |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`             |
 
-**Resolução (2026-05-10):** 386 testes (3 skipped) implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority + 42 vault_sync/cross-platform + 25 manifest + 10 ingest pipeline + 21 governor + 34 vector store protocol + 22 tree-sitter chunking + 6 dask engine + 20 BM25 sparse vectors + 9 hybrid search). Cobertura de chunking (markdown + code + tree-sitter multi-linguagem), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation (cross-platform), bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout, vault_sync backends (direct/python/rsync/auto), exclude patterns, incremental copy, delete_missing, `IngestManifest` (SQLite CRUD, crash recovery), `IngestPipeline` (bounded stages, backpressure), `ResourceGovernor` (thresholds, lifecycle, wait_until_safe, metrics JSONL, tuning backward compat), `VectorStore` protocol (upsert, query, delete, count, collection isolation, factory, Qdrant embedded), Dask engine factory (`create_parser_pool`, `DaskParserPool`) e integration tests com TestClient + QdrantVectorStore in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
+**Resolução (2026-05-10):** 329 testes (18 skipped) implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority + 42 vault_sync/cross-platform + 25 manifest + 10 ingest pipeline + 21 governor + 34 vector store protocol + 22 tree-sitter chunking + 6 dask engine + 18 graphify incremental). Total actual: 416 testes (3 skipped) em 21 ficheiros. Cobertura de chunking (markdown + code + tree-sitter multi-linguagem), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation (cross-platform), bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout, vault_sync backends (direct/python/rsync/auto), exclude patterns, incremental copy, delete_missing, `IngestManifest` (SQLite CRUD, crash recovery), `IngestPipeline` (bounded stages, backpressure), `ResourceGovernor` (thresholds, lifecycle, wait_until_safe, metrics JSONL, tuning backward compat), `VectorStore` protocol (upsert, query, delete, count, collection isolation, factory, Qdrant embedded), Dask engine factory (`create_parser_pool`, `DaskParserPool`), graphify incremental (`_file_md5`, `_detect_changes`, `build_graph` 3-tier) e integration tests com TestClient + QdrantVectorStore in-memory. Fixtures partilhadas em `conftest.py`. Nenhum teste depende de serviços externos.
 
 ### 10.2 ~~Autenticação da API~~ ✅ RESOLVIDO
 
@@ -1088,24 +1094,24 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 
 #### Prioridade 2 — Qualidade de retrieval a escala
 
-| #   | Tarefa                                                                                                                                                                                                                                                                                                                                                                   | Complexidade | Estado       | Ref  |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ | ------------ | ---- |
-| 182 | ~~**Hybrid search (sparse + dense)**~~ — BM25Vectorizer custom (Okapi BM25, k1=1.5, b=0.75) em `retrieval/sparse.py`. Sparse vectors armazenados no Qdrant via `SparseVectorParams`. Query fusion via Qdrant Prefetch + RRF. Modelo BM25 persistido em `data/qdrant/bm25/{collection}.json`. Zero novas dependências, zero VRAM. Fallback dense-only backward compatible | Média        | ✅ Concluído | §8.5 |
-| 183 | ~~**Query filtering por metadata**~~ — `VectorStore.query()` aceita `filters: dict` (Qdrant payload filter). `/query/code` usa filtro query-time por `repo_name`/`symbol_type`. CLI: `rag query --repo X "texto"`                                                                                                                                                        | Baixa        | ✅ Concluído | §8.6 |
-| 184 | ~~**Adaptive top_k por tamanho de coleção**~~ — `_scale_k_by_size()` escala `effective_k` por `1 + log10(size/1000)` quando >1000 chunks. Cache TTL 60s via `_cached_count()`. Bounds: min 3, max 30                                                                                                                                                                     | Baixa        | ✅ Concluído | —    |
+| #   | Tarefa                                                                                                                                                                                                                                      | Complexidade | Estado       | Ref  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ---- |
+| 182 | **Hybrid search (sparse + dense)** — adicionar sparse vectors (BM25-like) ao pipeline de embedding e ao `VectorStore.query()`. Qdrant suporta nativamente `SparseVector`. Requer: tokenizer BM25 local, alteração ao Protocol, query fusion | Média        | Não iniciado | §8.5 |
+| 183 | ~~**Query filtering por metadata**~~ — `VectorStore.query()` aceita `filters: dict` (Qdrant payload filter). `/query/code` usa filtro query-time por `repo_name`/`symbol_type`. CLI: `rag query --repo X "texto"`                           | Baixa        | ✅ Concluído | §8.6 |
+| 184 | ~~**Adaptive top_k por tamanho de coleção**~~ — `_scale_k_by_size()` escala `effective_k` por `1 + log10(size/1000)` quando >1000 chunks. Cache TTL 60s via `_cached_count()`. Bounds: min 3, max 30                                        | Baixa        | ✅ Concluído | —    |
 
 #### Prioridade 3 — Latência e throughput
 
-| #   | Tarefa                                                                                                                                                                                                                              | Complexidade | Estado       | Ref  |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ---- |
-| 185 | **Reranker paralelo** — paralelizar chamadas LLM do reranker com `ThreadPoolExecutor(max_workers=min(3, n))`, mesmo padrão de `enrich.py`. Cada chamada é I/O-bound HTTP. Reduz latência 3-5× com `top_k_candidates=30`             | Baixa        | Não iniciado | §8.7 |
-| 186 | **Graphify incremental por ficheiro** — tracking de ficheiros alterados por repo (via manifest ou hash comparison) e rebuild parcial apenas dos ficheiros modificados. Depende de suporte da lib `graphifyy` para extracção parcial | Média        | Não iniciado | §8.8 |
+| #   | Tarefa                                                                                                                                                                                                                                                                      | Complexidade | Estado       | Ref  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ---- |
+| 185 | **Reranker paralelo** — paralelizar chamadas LLM do reranker com `ThreadPoolExecutor(max_workers=min(3, n))`, mesmo padrão de `enrich.py`. Cada chamada é I/O-bound HTTP. Reduz latência 3-5× com `top_k_candidates=30`                                                     | Baixa        | Não iniciado | §8.7 |
+| 186 | ~~**Graphify incremental por ficheiro**~~ — modo incremental 3-tier: skip (sem alterações), `graphify update` (só código, AST-only), `graphify extract` (docs alterados, AST+LLM). `_detect_changes()` lê `manifest.json` do graphify e compara MD5 hashes. 18 novos testes | Média        | ✅ Concluído | §8.8 |
 
 #### Prioridade 4 — Infraestrutura e funcionalidades futuras
 
 | #   | Tarefa                                                                                                                                                                                                                                 | Complexidade | Estado       | Ref   |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ----- |
-| 187 | **Documentação operacional Qdrant server** — guia para migrar de embedded para server mode quando >50k chunks. Inclui `docker-compose.yml` (já tem profile), configuração de `qdrant_url`, benchmark embedded vs. server               | Baixa        | Não iniciado | §8.9  |
+| 187 | ~~**Documentação operacional Qdrant server**~~ — guia completo em `docs/QDRANT_SERVER_MODE.md`: migração embedded→server, Docker Compose, configuração `rag.toml`, migração de dados, verificação, rollback, comparação, segurança     | Baixa        | ✅ Concluído | §8.9  |
 | 188 | **Multi-vault Obsidian** — suportar `vault_dirs = [...]` em `rag.toml` com coleções separadas por vault. Alteração a `PathsConfig`, `sync_notes()`, lógica de coleções, e queries scoped (`rag query --vault pessoal "texto"`)         | Média        | Não iniciado | §8.10 |
 | 189 | **Ollama env vars no systemd** — automatizar configuração de `OLLAMA_NUM_PARALLEL=2` e `OLLAMA_MAX_LOADED_MODELS=2` via `rag init` ou `rag doctor --fix`. Verifica se as env vars estão definidas no serviço Ollama e sugere correcção | Baixa        | Não iniciado | —     |
 | 190 | **Métricas de sync em dashboard** — exportar métricas do pipeline (chunks/s, tempo por fase, VRAM usage) para ficheiro JSON/Parquet consultável. Possibilidade futura de dashboard web via `/metrics` endpoint                         | Baixa        | Não iniciado | —     |
@@ -1127,16 +1133,16 @@ Sprint 2 — Qualidade de retrieval
 ──────────────────────────────────────────────────────────────────
   #183  Query filtering por metadata       [Baixa]  ✅ Concluído
   #184  Adaptive top_k por coleção         [Baixa]  ✅ Concluído
-  #182  Hybrid search (sparse + dense)     [Média]  ✅ Concluído
+  #182  Hybrid search (sparse + dense)     [Média]  ← maior impacto, mais complexo
 
 Sprint 3 — Latência e throughput
 ──────────────────────────────────────────────────────────────────
   #185  Reranker paralelo                  [Baixa]  ← padrão já provado em enrich.py
-  #186  Graphify incremental               [Média]  ← depende de lib graphifyy
+  #186  Graphify incremental               [Média]  ✅ Concluído (3-tier: skip/update/extract)
 
 Sprint 4 — Infraestrutura futura
 ──────────────────────────────────────────────────────────────────
-  #187  Docs Qdrant server mode            [Baixa]  ← quando >50k chunks
+  #187  Docs Qdrant server mode            [Baixa]  ✅ Concluído (QDRANT_SERVER_MODE.md)
   #188  Multi-vault Obsidian               [Média]  ← quando vaults múltiplos
   #189  Ollama env vars automation         [Baixa]  ← DX improvement
   #190  Métricas de sync em dashboard      [Baixa]  ← observabilidade avançada
@@ -1146,8 +1152,8 @@ Sprint 4 — Infraestrutura futura
 
 ```
 #178 ──→ #179 (manifest automático via IngestPipeline)
-#182 ──→ precisa de #183 implementado primeiro (Protocol query com filters) ✅ ambos concluídos
-#186 ──→ investigar API da lib graphifyy para extracção parcial
+#182 ──→ precisa de #183 implementado primeiro (Protocol query com filters)
+#186 ──→ implementado sem dependência de API parcial da lib graphifyy (usa manifest.json nativo)
 #188 ──→ precisa de #183 (queries scoped por coleção/vault)
 ```
 

@@ -76,6 +76,7 @@ def _apply_worker_rlimits() -> None:
     """
     try:
         import resource
+
         import psutil
 
         total_ram = psutil.virtual_memory().total
@@ -419,6 +420,10 @@ class IngestPipeline:
                             self._result.chunks_produced += len(chunks)
                         print(f"  [parse] {job.repo_name}/{rel} → {len(chunks)} chunks")
 
+                        # Inject source_name for multi-vault filtering
+                        for chunk in chunks:
+                            chunk.metadata.setdefault("source_name", job.repo_name)
+
                         try:
                             file_path_rel = str(Path(job.path).relative_to(Path(job.repo_dir)))
                             stat = Path(job.path).stat()
@@ -493,6 +498,10 @@ class IngestPipeline:
                 with self._result_lock:
                     self._result.files_parsed += 1
                     self._result.chunks_produced += len(chunks)
+
+                # Inject source_name for multi-vault filtering
+                for chunk in chunks:
+                    chunk.metadata.setdefault("source_name", job.repo_name)
 
                 # Record in manifest
                 try:

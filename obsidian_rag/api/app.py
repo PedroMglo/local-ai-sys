@@ -202,7 +202,10 @@ def query(req: QueryRequest):
         raise HTTPException(status_code=400, detail="Query vazia")
     start = time.time()
     store = _get_store()
-    chunks = _query_store(store, "obsidian_vault", req)
+    filters: dict | None = None
+    if req.vault:
+        filters = {"source_name": req.vault}
+    chunks = _query_store(store, "obsidian_vault", req, filters=filters)
     elapsed_ms = (time.time() - start) * 1000
     return QueryResponse(results=chunks, query=req.query, elapsed_ms=round(elapsed_ms, 1))
 
@@ -237,7 +240,7 @@ def query_code(req: CodeQueryRequest):
 @app.get("/repos", response_model=ReposResponse)
 def repos():
     """Lista repos configurados com stats de chunks e grafo."""
-    from obsidian_rag.graph.query import list_repos
+    from obsidian_rag.pipeline.graph.query import list_repos
 
     repo_infos_raw = list_repos()
     repo_list = []
@@ -273,7 +276,7 @@ def repos():
 @app.get("/graph/{repo}")
 def graph_report(repo: str):
     """Devolve o GRAPH_REPORT.md de um repo como texto."""
-    from obsidian_rag.graph.query import get_report
+    from obsidian_rag.pipeline.graph.query import get_report
     try:
         report = get_report(repo)
         return {"repo": repo, "report": report}
@@ -284,7 +287,7 @@ def graph_report(repo: str):
 @app.post("/graph/{repo}/query")
 def graph_query(repo: str, req: GraphQueryRequest):
     """Executa uma query ao knowledge graph de um repo."""
-    from obsidian_rag.graph.query import query_graph
+    from obsidian_rag.pipeline.graph.query import query_graph
     result = query_graph(repo, req.query)
     return {"repo": repo, "query": req.query, "result": result}
 
@@ -292,7 +295,7 @@ def graph_query(repo: str, req: GraphQueryRequest):
 @app.get("/graph/{repo}/neighbors/{node}")
 def graph_neighbors(repo: str, node: str, max_results: int = 10):
     """Devolve nós vizinhos de um conceito no grafo."""
-    from obsidian_rag.graph.query import get_neighbors
+    from obsidian_rag.pipeline.graph.query import get_neighbors
     try:
         neighbors = get_neighbors(repo, node, max_results=max_results)
         return GraphNeighborsResponse(node=node, repo=repo, neighbors=neighbors)

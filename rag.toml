@@ -5,7 +5,7 @@
 [paths]
 source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
 data_dir = "data/qdrant"        # relativo à raiz do projeto
-vault_dir = "~/Obsidian/Vault"  # fonte principal — expandido em runtime
+vault_dirs = ["~/Obsidian/Vault", "~/Obsidian/Work"]  # multi-vault (overrides vault_dir)
 
 # =============================================================================
 # SYNC — como o Vault Obsidian é lido pelo pipeline

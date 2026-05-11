@@ -58,6 +58,24 @@ repos:
           - "."
         additional_dependencies: ["bandit[toml]"]
 
+  # ── Lint (espelha CI: ruff check) ──────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.13
+    hooks:
+      - id: ruff
+        files: ^obsidian_rag/
+
+  # ── Type-check (espelha CI: mypy) ────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy type-check
+        entry: mypy obsidian_rag/
+        language: system
+        pass_filenames: false
+        types: [python]
+
+  # ── Security ─────────────────────────────────────────────────────────────
   - repo: https://github.com/semgrep/pre-commit
     rev: v1.162.0
     hooks:
@@ -69,3 +87,14 @@ repos:
           - "p/security-audit"
           - "--error"
           - "--skip-unknown-extensions"
+
+  # ── Testes (pre-push — espelha CI: pytest + cobertura) ───────────────────
+  - repo: local
+    hooks:
+      - id: pytest-ci
+        name: pytest (pre-push gate)
+        entry: pytest tests/ -q --tb=short --cov=obsidian_rag --cov-report=term-missing --cov-fail-under=30
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true

@@ -208,8 +208,8 @@ class TestAllExports:
         assert hasattr(obsidian_rag.retrieval, '__all__')
 
     def test_graph_has_all(self):
-        import obsidian_rag.graph
-        assert hasattr(obsidian_rag.graph, '__all__')
+        import obsidian_rag.pipeline.graph
+        assert hasattr(obsidian_rag.pipeline.graph, '__all__')
 
     def test_pipeline_has_all(self):
         import obsidian_rag.pipeline

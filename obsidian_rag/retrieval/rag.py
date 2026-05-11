@@ -5,8 +5,11 @@ determines it's needed AND retrieval quality passes the relevance gate.
 """
 
 import logging
+import math as _math
 import threading
+import time as _time
 import unicodedata
+from pathlib import Path as _Path
 
 from obsidian_rag.config import settings
 from obsidian_rag.embeddings.ollama import get_query_embedding
@@ -15,6 +18,7 @@ from obsidian_rag.retrieval.budget import allocate_budget, truncate_chunks, trun
 from obsidian_rag.retrieval.intent import detect_intent_full
 from obsidian_rag.retrieval.observe import QueryTrace
 from obsidian_rag.retrieval.router import _GRAPH_PATTERNS, _GRAPH_SIGNALS, ContextMode
+from obsidian_rag.retrieval.sparse import BM25Vectorizer, tokenize
 from obsidian_rag.store.base import VectorStore, create_store
 
 log = logging.getLogger("obsidian_rag")
@@ -76,8 +80,6 @@ def _reset_collections():
 
 
 # === Collection-size cache (TTL 60 s) ===
-import math as _math
-import time as _time
 
 _count_cache: dict[str, tuple[int, float]] = {}
 _COUNT_TTL = 60.0
@@ -166,20 +168,18 @@ def _vector_search(store: VectorStore, query_text: str, n: int, *, collection: s
 
 # === BM25 sparse query helper ===
 
-_bm25_cache: dict[str, object] = {}  # collection → BM25Vectorizer
+_bm25_cache: dict[str, BM25Vectorizer | None] = {}  # collection → BM25Vectorizer
 
 
 def _get_sparse_query(query_text: str, collection: str) -> dict | None:
     """Load BM25 model and transform query to sparse vector. Returns None if unavailable."""
-    from obsidian_rag.retrieval.sparse import BM25Vectorizer, tokenize
-    from pathlib import Path
-
     if collection not in _bm25_cache:
         try:
-            model_path = Path(settings.paths.data_dir) / "bm25" / f"{collection}.json"
+            model_path = _Path(settings.paths.data_dir) / "bm25" / f"{collection}.json"
             if model_path.exists():
-                _bm25_cache[collection] = BM25Vectorizer.load(model_path)
-                log.info("BM25: loaded model for %r (vocab=%d)", collection, _bm25_cache[collection].vocab_size)
+                loaded = BM25Vectorizer.load(model_path)
+                _bm25_cache[collection] = loaded
+                log.info("BM25: loaded model for %r (vocab=%d)", collection, loaded.vocab_size)
             else:
                 _bm25_cache[collection] = None
         except Exception as exc:
@@ -422,7 +422,7 @@ def build_rag_context(
     # Graph-only mode (no code chunks needed)
     if intent.use_graph and not code_relevant and not intent.use_code:
         try:
-            from obsidian_rag.graph.cache import graph_cache
+            from obsidian_rag.pipeline.graph.cache import graph_cache
             from obsidian_rag.retrieval.graph_context import build_graph_context
 
             synthetic_chunks: list[tuple[str, dict, float]] = []

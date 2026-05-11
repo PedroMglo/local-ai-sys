@@ -7,20 +7,11 @@ O graphify processa:
 
 Os grafos ficam persistidos em:
   {settings.graphify.output_dir}/{repo_name}/graphify-out/graph.json
-
-Incremental mode:
-  Before spawning a subprocess, the builder checks graphify's own
-  manifest.json (file hashes) against current files.  If nothing
-  changed the subprocess is skipped entirely.  When only code files
-  changed (no .md/.txt), ``graphify update`` (AST-only, no LLM) is
-  used instead of the full ``graphify extract``.
 """
 
 from __future__ import annotations
 
 import gc
-import hashlib
-import json
 import logging
 import os
 import subprocess
@@ -29,9 +20,6 @@ from pathlib import Path
 from obsidian_rag.config import settings
 
 log = logging.getLogger(__name__)
-
-# File extensions that require LLM semantic extraction (vs AST-only)
-_DOC_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".adoc"})
 
 
 def _graphify_output_dir(repo_path: Path) -> Path:
@@ -56,89 +44,12 @@ def _report_path(repo_path: Path) -> Path:
     return _graphify_output_dir(repo_path) / "GRAPH_REPORT.md"
 
 
-# ---------------------------------------------------------------------------
-# Incremental change detection
-# ---------------------------------------------------------------------------
-
-def _file_md5(path: Path) -> str:
-    """Compute MD5 hex digest of a file (matches graphify's manifest hash)."""
-    h = hashlib.md5(usedforsecurity=False)
-    try:
-        with path.open("rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                h.update(chunk)
-    except OSError:
-        return ""
-    return h.hexdigest()
-
-
-def _detect_changes(repo_path: Path, manifest_path: Path) -> tuple[bool, bool]:
-    """Compare graphify manifest.json against current repo files.
-
-    Returns:
-        (has_changes, has_doc_changes) — *has_doc_changes* is True when
-        at least one changed/new file has a doc extension (.md, .txt, …).
-    """
-    if not manifest_path.exists():
-        return True, True  # no manifest → full build needed
-
-    try:
-        manifest: dict = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return True, True
-
-    has_changes = False
-    has_doc_changes = False
-
-    # Check existing manifest entries for changed/deleted files
-    for file_path_str, info in manifest.items():
-        fp = Path(file_path_str)
-        if not fp.exists():
-            has_changes = True
-            if fp.suffix.lower() in _DOC_EXTENSIONS:
-                has_doc_changes = True
-            continue
-        stored_hash = info.get("hash", "")
-        if stored_hash and _file_md5(fp) != stored_hash:
-            has_changes = True
-            if fp.suffix.lower() in _DOC_EXTENSIONS:
-                has_doc_changes = True
-
-    # Early exit if we already know docs changed
-    if has_doc_changes:
-        return True, True
-
-    # Check for new files not in the manifest (walk repo)
-    manifest_paths = set(manifest.keys())
-    try:
-        for child in repo_path.rglob("*"):
-            if not child.is_file():
-                continue
-            # Skip hidden dirs and common non-source paths
-            parts = child.relative_to(repo_path).parts
-            if any(p.startswith(".") or p in ("node_modules", "__pycache__", ".git", "venv", ".venv") for p in parts):
-                continue
-            if str(child) not in manifest_paths:
-                has_changes = True
-                if child.suffix.lower() in _DOC_EXTENSIONS:
-                    has_doc_changes = True
-                    return True, True
-    except OSError:
-        pass
-
-    return has_changes, has_doc_changes
-
-
 def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
-    """Executa graphify extract/update para um único repo.
+    """Executa graphify extract para um único repo.
 
-    Incremental logic (when *force* is False):
-      1. Read graphify's manifest.json and compare file hashes.
-      2. If nothing changed → skip subprocess entirely.
-      3. If only code files changed → ``graphify update`` (AST-only, no LLM).
-      4. If doc files also changed → ``graphify extract`` (AST + LLM).
-
-    Returns True if successful (or no changes), False on error.
+    Se *force* for True, apaga o manifest.json para forçar re-extracção total.
+    Caso contrário, extract detecta automaticamente se faz rebuild ou incremental.
+    Retorna True se bem sucedido, False caso contrário.
     """
     repo_path = Path(repo_path).expanduser().resolve()
     if not repo_path.exists():
@@ -161,39 +72,16 @@ def build_graph(repo_path: Path | str, *, force: bool = False) -> bool:
         log.info("[Graphify] Grafo já existe para '%s' e auto_update=false — skipping.", repo_path.name)
         return True
 
-    # --- Incremental change detection ---
-    use_update = False  # True → graphify update (AST-only), False → graphify extract
-    if not force and manifest_json.exists() and graph_json.exists():
-        has_changes, has_doc_changes = _detect_changes(repo_path, manifest_json)
-        if not has_changes:
-            log.info("[Graphify] Sem alterações em '%s' — skipping.", repo_path.name)
-            print(f"  [graphify] {repo_path.name}: sem alterações — skip")
-            return True
-        if not has_doc_changes:
-            use_update = True
-            log.info("[Graphify] Apenas código alterado em '%s' — graphify update (sem LLM).", repo_path.name)
+    mode = "rebuild completo" if force else ("incremental" if manifest_json.exists() else "build inicial")
 
-    if force:
-        mode = "rebuild completo"
-    elif use_update:
-        mode = "update (AST-only)"
-    elif manifest_json.exists():
-        mode = "incremental"
-    else:
-        mode = "build inicial"
-
-    # --- Build command ---
-    if use_update:
-        cmd = ["graphify", "update", str(repo_path)]
-    else:
-        cmd = [
-            "graphify", "extract", str(repo_path),
-            "--backend", settings.graphify.backend,
-            "--out", str(_graphify_out_parent(repo_path)),
-        ]
+    cmd = [
+        "graphify", "extract", str(repo_path),
+        "--backend", settings.graphify.backend,
+        "--out", str(_graphify_out_parent(repo_path)),
+    ]
 
     # Modelo específico (por defeito graphify usa qwen2.5-coder:7b com ollama)
-    if settings.graphify.model and not use_update:
+    if settings.graphify.model:
         cmd += ["--model", settings.graphify.model]
 
     log.info("[Graphify] %s — %s", repo_path.name, mode)

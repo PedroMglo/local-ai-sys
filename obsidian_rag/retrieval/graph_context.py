@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 
-from obsidian_rag.graph.cache import graph_cache
+from obsidian_rag.pipeline.graph.cache import graph_cache
 from obsidian_rag.retrieval.budget import estimate_tokens
 
 log = logging.getLogger("obsidian_rag")

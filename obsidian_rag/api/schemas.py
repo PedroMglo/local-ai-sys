@@ -11,6 +11,7 @@ class QueryRequest(BaseModel):
     query: str = Field(..., description="Texto da pergunta/busca", min_length=1, max_length=10000)
     top_k: int = Field(default=settings.api.query_top_k, ge=1, le=50)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    vault: str | None = Field(default=None, description="Filtrar por vault (nome do directório)")
 
 
 class CodeQueryRequest(QueryRequest):

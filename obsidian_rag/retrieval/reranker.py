@@ -1,13 +1,15 @@
 """Optional cross-encoder reranker via Ollama.
 
 Uses a fast LLM to score relevance of retrieved chunks against the
-original query. Disabled by default (adds latency).
+original query.  Candidates are scored in parallel via ThreadPoolExecutor
+(I/O-bound HTTP calls to Ollama).  Disabled by default (adds latency).
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 
 import httpx
@@ -52,19 +54,34 @@ def rerank_chunks(
     candidates = chunks[:cfg.top_k_candidates]
     scored: list[tuple[str, dict, float]] = []
 
-    for doc, meta, vec_score in candidates:
-        display = meta.get("display_text", doc)
-        # Truncate very long chunks for reranking
-        text_for_scoring = display[:1500] if len(display) > 1500 else display
+    # Parallel scoring — each _score_chunk is an I/O-bound HTTP call
+    max_workers = min(3, len(candidates))
 
+    def _evaluate(item: tuple[str, dict, float]) -> tuple[str, dict, float] | None:
+        doc, meta, vec_score = item
+        display = meta.get("display_text", doc)
+        text_for_scoring = display[:1500] if len(display) > 1500 else display
         score = _score_chunk(query, text_for_scoring, cfg.model)
         if score is not None and score >= cfg.min_score:
-            # Combine: 60% reranker + 40% vector score (normalized)
             combined = 0.6 * score + 0.4 * vec_score
-            scored.append((doc, meta, combined))
-        elif score is None:
+            return (doc, meta, combined)
+        if score is None:
             # LLM scoring failed — keep with original score
-            scored.append((doc, meta, vec_score))
+            return (doc, meta, vec_score)
+        return None  # below min_score
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_evaluate, c): c for c in candidates}
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result is not None:
+                    scored.append(result)
+            except Exception as exc:
+                # On unexpected error, keep chunk with original vector score
+                doc, meta, vec_score = futures[future]
+                log.debug("Reranker: parallel scoring error: %s", exc)
+                scored.append((doc, meta, vec_score))
 
     scored.sort(key=lambda x: x[2], reverse=True)
     log.info("Reranker: %d/%d chunks passed (min_score=%.1f)", len(scored), len(candidates), cfg.min_score)
