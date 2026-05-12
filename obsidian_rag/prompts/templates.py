@@ -43,6 +43,10 @@ ROUTER_SYSTEM = (
     "architecture, or structure of local projects/code\n"
     "- RAG_AND_GRAPH: the question needs both local content and structural "
     "relationships between local components\n"
+    "- SYSTEM: the question asks about the current state of the user's machine "
+    "(RAM, GPU, CPU, disk, processes, temperature, network, hardware status)\n"
+    "- SYSTEM_AND_RAG: the question needs both live system state AND local "
+    "knowledge (e.g., 'do I have enough VRAM for my installed models?')\n"
     "- CLARIFY: the question is ambiguous and it is impossible to determine "
     "if local context is needed\n\n"
     "Respond ONLY in this exact format (two lines, nothing else):\n"
@@ -58,6 +62,12 @@ ROUTER_SYSTEM = (
     'Question: "Which components of my project depend on Qdrant?"\n'
     "ROUTE: RAG_AND_GRAPH\n"
     "REASON: Asks about dependencies in a local project.\n\n"
+    'Question: "How much free RAM do I have right now?"\n'
+    "ROUTE: SYSTEM\n"
+    "REASON: Asks about live machine state.\n\n"
+    'Question: "Can my GPU run a 13B model with the VRAM I have free?"\n'
+    "ROUTE: SYSTEM_AND_RAG\n"
+    "REASON: Needs live GPU state and local model documentation.\n\n"
     'Question: "What is the capital of Norway?"\n'
     "ROUTE: NO_CONTEXT\n"
     "REASON: General geography fact.\n\n"
@@ -164,6 +174,22 @@ COMBINED_CONTEXT_INSTRUCTION = (
 )
 
 # =============================================================================
+# SYSTEM STATE PROMPT — When live machine data is injected
+# =============================================================================
+
+SYSTEM_CONTEXT_INSTRUCTION = (
+    "The context below contains LIVE system data collected in real-time from the "
+    "user's machine (RAM, GPU, CPU, disk, processes, etc.).\n\n"
+    "Instructions:\n"
+    "- Use this data to answer questions about the machine's current state accurately.\n"
+    "- Present numbers and metrics clearly (e.g., '5.2 GB of 8 GB VRAM used').\n"
+    "- When the user asks if something 'fits' or 'will work', calculate based on "
+    "the actual available resources shown.\n"
+    "- If a metric is missing (command unavailable), acknowledge it rather than guessing.\n"
+    "- Do NOT fabricate system metrics not present in the context."
+)
+
+# =============================================================================
 # FALLBACK PROMPT — When retrieved context is too weak
 # =============================================================================
 
@@ -183,6 +209,10 @@ FALLBACK_WEAK_CONTEXT = (
 
 def get_context_instruction(sources_used: str) -> str:
     """Return the appropriate context instruction based on sources used."""
+    if "system" in sources_used and "rag" in sources_used:
+        return SYSTEM_CONTEXT_INSTRUCTION + "\n\n" + RAG_CONTEXT_INSTRUCTION
+    if sources_used == "system":
+        return SYSTEM_CONTEXT_INSTRUCTION
     if sources_used == "rag+graph":
         return COMBINED_CONTEXT_INSTRUCTION
     elif sources_used == "graph":

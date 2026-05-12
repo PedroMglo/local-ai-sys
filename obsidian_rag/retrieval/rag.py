@@ -290,6 +290,32 @@ def build_rag_context(
     notes_relevant: list[tuple[str, dict, float]] = []
     code_relevant: list[tuple[str, dict, float]] = []
     graph_context_str = ""
+    system_context_str = ""
+
+    # --- System context (real-time) ---
+    if intent.use_system:
+        try:
+            from obsidian_rag.retrieval.system_context import collect_system_context
+            system_context_str = collect_system_context(query)
+        except Exception as exc:
+            log.warning("System context collection failed: %s", exc)
+            system_context_str = ""
+
+    # SYSTEM-only: no Qdrant search needed, return system context directly
+    if decision.mode == ContextMode.SYSTEM and not intent.use_notes:
+        if system_context_str:
+            trace.context_accepted = True
+            trace.sources_used = "system"
+            instruction = get_context_instruction("system")
+            full = system_context_str + "\n\n" + instruction if instruction else system_context_str
+            trace.log_summary()
+            return full, True, "system"
+        else:
+            trace.context_accepted = False
+            trace.context_rejected_reason = "System context collection returned no data."
+            trace.sources_used = "none"
+            trace.log_summary()
+            return "", False, "none"
 
     # --- Adaptive top_k ---
     complexity = _estimate_complexity(query)
@@ -506,6 +532,10 @@ def build_rag_context(
     if graph_context_str:
         context_parts.append(graph_context_str)
 
+    # System block (SYSTEM_AND_RAG: system data alongside RAG results)
+    if system_context_str:
+        context_parts.append(system_context_str)
+
     full_context = "\n\n".join(context_parts)
 
     # Determine sources used
@@ -514,6 +544,8 @@ def build_rag_context(
         sources.add("rag")
     if graph_context_str:
         sources.add("graph")
+    if system_context_str:
+        sources.add("system")
     sources_used = "+".join(sorted(sources)) or "none"
     trace.sources_used = sources_used
 

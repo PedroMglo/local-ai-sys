@@ -26,6 +26,8 @@ class ContextMode(str, Enum):
     RAG_ONLY = "RAG_ONLY"
     GRAPH_ONLY = "GRAPH_ONLY"
     RAG_AND_GRAPH = "RAG_AND_GRAPH"
+    SYSTEM = "SYSTEM"
+    SYSTEM_AND_RAG = "SYSTEM_AND_RAG"
     CLARIFY = "CLARIFY"
 
 
@@ -79,6 +81,52 @@ _GRAPH_SIGNALS = frozenset({
     "upstream", "downstream", "montante", "jusante",
 })
 
+# Signals that the user asks about the machine's live state
+_SYSTEM_SIGNALS = frozenset({
+    # Hardware / resources (PT + EN)
+    "ram", "memória", "memory", "vram",
+    "gpu", "cpu", "processador", "processor",
+    "disco", "disk", "storage", "armazenamento",
+    "temperatura", "temperature", "temp",
+    "processos", "processes",
+    "sistema", "system",
+    "kernel", "driver", "drivers",
+    "nvidia", "amd", "cuda",
+    "swap", "hardware",
+    "máquina", "machine", "pc", "computador", "computer",
+    "uptime", "carga", "load",
+    "espaço", "space",
+    "rede", "network", "ip",
+    "bateria", "battery",
+})
+
+_SYSTEM_PATTERNS = (
+    # PT
+    "quanto de ram", "quanta ram", "quanta memória", "memória livre",
+    "espaço em disco", "espaço livre", "uso do disco",
+    "temperatura do", "temperatura da",
+    "está a usar gpu", "está a usar a gpu",
+    "o que está a correr", "o que está a consumir",
+    "processos activos", "processos ativos",
+    "carga do sistema", "uso de cpu",
+    # EN
+    "how much memory", "how much ram", "free memory", "free ram",
+    "disk space", "disk usage", "free space",
+    "temperature of", "gpu temperature", "cpu temperature",
+    "using my gpu", "what is running", "what is using",
+    "system load", "cpu usage", "memory usage",
+)
+
+# Compound terms where a system keyword is NOT about real hardware
+_SYSTEM_FALSE_POSITIVES = (
+    "machine learning", "system design", "system prompt",
+    "operating system", "file system", "type system",
+    "memory model", "memory management", "memory leak",
+    "memory safety", "space complexity", "disk image",
+    "network protocol", "network layer", "ip address",
+    "load balancing", "load balancer",
+)
+
 # Multi-word patterns for graph queries
 _GRAPH_PATTERNS = (
     # PT
@@ -104,6 +152,37 @@ def _heuristic_route(query: str) -> RoutingDecision:
 
     has_local = bool(words & _LOCAL_SIGNALS)
     has_graph = bool(words & _GRAPH_SIGNALS) or any(p in q_lower for p in _GRAPH_PATTERNS)
+    has_system = bool(words & _SYSTEM_SIGNALS) or any(p in q_lower for p in _SYSTEM_PATTERNS)
+
+    # Suppress false positives: "machine learning", "system design", etc.
+    if has_system and any(fp in q_lower for fp in _SYSTEM_FALSE_POSITIVES):
+        # Only suppress if the false-positive explains ALL system keyword hits
+        fp_words = set()
+        for fp in _SYSTEM_FALSE_POSITIVES:
+            if fp in q_lower:
+                fp_words.update(fp.split())
+        remaining_system = (words & _SYSTEM_SIGNALS) - fp_words
+        remaining_patterns = any(
+            p in q_lower for p in _SYSTEM_PATTERNS
+            if not any(fp in q_lower and p in fp for fp in _SYSTEM_FALSE_POSITIVES)
+        )
+        has_system = bool(remaining_system) or remaining_patterns
+
+    # System queries take priority (real-time data needed)
+    if has_system and has_local:
+        return RoutingDecision(
+            mode=ContextMode.SYSTEM_AND_RAG,
+            confidence=0.7,
+            reason="System state query combined with local content reference.",
+            method="heuristic",
+        )
+    if has_system:
+        return RoutingDecision(
+            mode=ContextMode.SYSTEM,
+            confidence=0.7,
+            reason="Query about live machine state (hardware/resources).",
+            method="heuristic",
+        )
 
     if has_local and has_graph:
         return RoutingDecision(
@@ -151,7 +230,7 @@ def _heuristic_route(query: str) -> RoutingDecision:
 # ── LLM-based router ────────────────────────────────────────────────────────
 
 _ROUTE_PATTERN = re.compile(
-    r"ROUTE:\s*(NO_CONTEXT|RAG_ONLY|GRAPH_ONLY|RAG_AND_GRAPH|CLARIFY)",
+    r"ROUTE:\s*(NO_CONTEXT|RAG_ONLY|GRAPH_ONLY|RAG_AND_GRAPH|SYSTEM|SYSTEM_AND_RAG|CLARIFY)",
     re.IGNORECASE,
 )
 _REASON_PATTERN = re.compile(r"REASON:\s*(.+)", re.IGNORECASE)
@@ -245,6 +324,7 @@ def route_query(query: str, *, context_mode: str | None = None, history: list[di
         "rag_only": ContextMode.RAG_ONLY,
         "graph_only": ContextMode.GRAPH_ONLY,
         "both": ContextMode.RAG_AND_GRAPH,
+        "system": ContextMode.SYSTEM,
     }
     if mode in explicit_map:
         return RoutingDecision(

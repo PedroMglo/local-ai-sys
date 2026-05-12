@@ -1,6 +1,6 @@
 # IMPROVEMENTS AND RISKS — obsidian-rag
 
-> **Versão:** 0.5.4 → v1.1 (plano)
+> **Versão:** 0.5.5 → v1.1 (plano)
 > **Última atualização:** 2026-05-12
 > **Âmbito:** Análise crítica de falhas, riscos, melhorias e roadmap
 
@@ -33,7 +33,7 @@
 | **Complexidade**       | Média                                                                 |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`                                            |
 
-**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 389 testes passam (1 falha pré-existente por Qdrant version mismatch, 3 skipped) em 23 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 18 para graphify incremental + 16 para multi-vault + 4 para concorrência). Faltam integration tests e2e com Ollama.
+**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 443 testes passam em 23 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 18 para graphify incremental + 16 para multi-vault + 4 para concorrência + 6 para system routing). Faltam integration tests e2e com Ollama.
 
 ### 1.2 ~~Singletons mutáveis para coleções do vector store~~ ✅ RESOLVIDO
 
@@ -640,7 +640,7 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | **Complexidade**       | Média                                  |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`             |
 
-**Resolução (2026-05-10):** 329 testes (18 skipped) implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority + 42 vault_sync/cross-platform + 25 manifest + 10 ingest pipeline + 21 governor + 34 vector store protocol + 22 tree-sitter chunking + 6 dask engine + 18 graphify incremental). Total actual: 389 testes passam (1 falha pré-existente por Qdrant version mismatch, 3 skipped) em 23 ficheiros. Cobertura de chunking (markdown + code + tree-sitter multi-linguagem), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation (cross-platform), bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout, vault_sync backends (direct/python/rsync/auto), exclude patterns, incremental copy, delete_missing, `IngestManifest` (SQLite CRUD, crash recovery), `IngestPipeline` (bounded stages, backpressure), `ResourceGovernor` (thresholds, lifecycle, wait_until_safe, metrics JSONL, tuning backward compat), `VectorStore` protocol (upsert, query, delete, count, collection isolation, factory, Qdrant embedded/server, health), Dask engine factory (`create_parser_pool`, `DaskParserPool`), graphify incremental (`_file_md5`, `_detect_changes`, `build_graph` 3-tier), concorrência (parallel queries, query during upsert, multi-collection, health under load) e integration tests com TestClient + QdrantVectorStore in-memory. Fixtures partilhadas em `conftest.py`. Testes de concorrência com Qdrant server validados em CI via `test-server-mode` job.
+**Resolução (2026-05-10):** 329 testes (18 skipped) implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority + 42 vault_sync/cross-platform + 25 manifest + 10 ingest pipeline + 21 governor + 34 vector store protocol + 22 tree-sitter chunking + 6 dask engine + 18 graphify incremental). Total actual: 443 testes passam em 23 ficheiros. Cobertura de chunking (markdown + code + tree-sitter multi-linguagem), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation (cross-platform), bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout, vault_sync backends (direct/python/rsync/auto), exclude patterns, incremental copy, delete_missing, `IngestManifest` (SQLite CRUD, crash recovery), `IngestPipeline` (bounded stages, backpressure), `ResourceGovernor` (thresholds, lifecycle, wait_until_safe, metrics JSONL, tuning backward compat), `VectorStore` protocol (upsert, query, delete, count, collection isolation, factory, Qdrant embedded/server, health), Dask engine factory (`create_parser_pool`, `DaskParserPool`), graphify incremental (`_file_md5`, `_detect_changes`, `build_graph` 3-tier), concorrência (parallel queries, query during upsert, multi-collection, health under load) e integration tests com TestClient + QdrantVectorStore in-memory. Fixtures partilhadas em `conftest.py`. Testes de concorrência com Qdrant server validados em CI via `test-server-mode` job.
 
 ### 10.2 ~~Autenticação da API~~ ✅ RESOLVIDO
 
@@ -1215,6 +1215,36 @@ Sprint 4 — Infraestrutura futura
   #190  Métricas de sync em dashboard      [Baixa]  ← observabilidade avançada
   #191  Concorrência real Qdrant server    [Média]  ✅ Concluído (2026-05-12, #188/191)
 ```
+
+---
+
+### Fase 23 — System Context: live machine state routing (v0.5.5, 2026-05-12) ✅
+
+| #   | Tarefa                                                                                                                                                                                                                                                                         | Complexidade | Estado       |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ | ------------ |
+| 210 | ~~`system_context.py` (novo): colector de estado live do sistema. Comandos read-only (`free -h`, `nvidia-smi`, `df -h`, `uptime`, `nproc`, `ps aux`, `ip addr`, `sensors`) com timeout 5s. `_detect_subsystems()` identifica subsistemas por keywords. Output Markdown~~       | Média        | ✅ Concluído |
+| 211 | ~~`router.py`: `ContextMode.SYSTEM` e `ContextMode.SYSTEM_AND_RAG` adicionados ao enum. `_SYSTEM_SIGNALS`, `_SYSTEM_PATTERNS` e `_SYSTEM_FALSE_POSITIVES` para routing heurístico. Supressão de falsos positivos ("machine learning", "system design", etc.)~~               | Média        | ✅ Concluído |
+| 212 | ~~`intent.py`: `QueryIntent.use_system: bool` field. Mapeamento SYSTEM → `use_system=True`, SYSTEM_AND_RAG → `use_notes=True, use_code=True, use_system=True`~~                                                                                                               | Baixa        | ✅ Concluído |
+| 213 | ~~`rag.py`: `build_rag_context()` trata modos SYSTEM (retorna dados live sem Qdrant) e SYSTEM_AND_RAG (combina live + RAG). `"system"` registado em `sources_used`~~                                                                                                         | Média        | ✅ Concluído |
+| 214 | ~~`templates.py`: novo `SYSTEM_CONTEXT_INSTRUCTION`. `get_context_instruction()` atualizado para tratar `"system"` e fontes combinadas~~                                                                                                                                      | Baixa        | ✅ Concluído |
+| 215 | ~~`sync.py`: flag `rag sync --system` e nova função `sync_system_snapshot()` — gera snapshot estático do sistema em `source/AI-context/system-profile/live-state.md`~~                                                                                                          | Baixa        | ✅ Concluído |
+| 216 | ~~`test_router.py`: 6 novos testes para system routing (SYSTEM mode, SYSTEM_AND_RAG mode, false-positive suppression para "machine learning"/"system design")~~                                                                                                              | Baixa        | ✅ Concluído |
+
+> **Fase 23 concluída em 2026-05-12.** Nova funcionalidade de System Context que permite ao LLM responder a queries sobre o estado real da máquina (RAM, GPU, CPU, disco, processos, rede, temperatura) com dados live.
+>
+> **Arquitectura:** O router heurístico detecta keywords de hardware/sistema (`_SYSTEM_SIGNALS`: ram, gpu, cpu, disco, temperatura, nvidia, etc.) e padrões multi-palavra (`_SYSTEM_PATTERNS`: "quanto de ram", "disk space", etc.) e encaminha para os novos modos `SYSTEM` ou `SYSTEM_AND_RAG`. Falsos positivos de termos compostos ("machine learning", "system design", "memory model", etc.) são suprimidos via `_SYSTEM_FALSE_POSITIVES` — só suprime se o falso positivo explica TODOS os hits de keywords de sistema.
+>
+> **Fluxo SYSTEM:** query → router (SYSTEM) → `system_context.collect_system_context(query)` → dados live formatados como Markdown → injetados no prompt sob label `[SYSTEM — LIVE STATE]`. Qdrant não é consultado.
+>
+> **Fluxo SYSTEM_AND_RAG:** query → router (SYSTEM_AND_RAG) → dados live + pesquisa vectorial (notas + código) → contexto combinado.
+>
+> **CLI:** `rag sync --system` gera um snapshot estático em `source/AI-context/system-profile/live-state.md` via `sync_system_snapshot()`, que pode ser indexado pelo RAG para pesquisa semântica histórica.
+>
+> **Segurança:** Todos os comandos são read-only (sem sudo, sem escritas). Timeout de 5s por comando. Falhas são silenciosas (skip com log debug). Nenhum dado sensível é exposto (IPs locais são informação do próprio utilizador).
+>
+> **Testes:** 6 novos testes em `test_router.py` validam: routing SYSTEM para queries de hardware, routing SYSTEM_AND_RAG para queries combinadas, e supressão de falsos positivos. Total: 443 testes passam.
+>
+> Ficheiros afetados: `retrieval/system_context.py` (novo), `retrieval/router.py`, `retrieval/intent.py`, `retrieval/rag.py`, `prompts/templates.py`, `pipeline/sync.py`, `tests/test_router.py`.
 
 #### Dependências entre tarefas
 

@@ -17,6 +17,7 @@ class QueryIntent:
     use_notes: bool
     use_code: bool
     use_graph: bool
+    use_system: bool = False
 
 
 # Mapping from ContextMode → QueryIntent flags
@@ -25,6 +26,8 @@ _MODE_TO_INTENT = {
     ContextMode.RAG_ONLY:      QueryIntent(use_notes=True,  use_code=True,  use_graph=False),
     ContextMode.GRAPH_ONLY:    QueryIntent(use_notes=False, use_code=False, use_graph=True),
     ContextMode.RAG_AND_GRAPH: QueryIntent(use_notes=True,  use_code=True,  use_graph=True),
+    ContextMode.SYSTEM:        QueryIntent(use_notes=False, use_code=False, use_graph=False, use_system=True),
+    ContextMode.SYSTEM_AND_RAG: QueryIntent(use_notes=True, use_code=True,  use_graph=False, use_system=True),
     ContextMode.CLARIFY:       QueryIntent(use_notes=True,  use_code=True,  use_graph=False),
 }
 

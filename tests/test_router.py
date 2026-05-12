@@ -72,3 +72,30 @@ class TestHeuristicRoute:
     def test_call_chain_pattern(self):
         decision = _heuristic_route("what calls the build_rag_context in my project?")
         assert decision.mode == ContextMode.RAG_AND_GRAPH
+
+    # --- System signals ---
+
+    def test_system_ram_query(self):
+        decision = _heuristic_route("quanta ram tenho?")
+        assert decision.mode == ContextMode.SYSTEM
+
+    def test_system_gpu_query(self):
+        decision = _heuristic_route("que GPU tenho instalada?")
+        assert decision.mode == ContextMode.SYSTEM
+
+    def test_system_temperature(self):
+        decision = _heuristic_route("verifica a temperatura do cpu")
+        assert decision.mode == ContextMode.SYSTEM
+
+    def test_system_and_rag(self):
+        decision = _heuristic_route("como configurei o ollama na minha máquina?")
+        assert decision.mode == ContextMode.SYSTEM_AND_RAG
+
+    def test_machine_learning_not_system(self):
+        """'machine learning' should NOT trigger SYSTEM route."""
+        decision = _heuristic_route("Pesquisa no meu vault por machine learning")
+        assert decision.mode == ContextMode.RAG_ONLY
+
+    def test_system_design_not_system(self):
+        decision = _heuristic_route("what is system design?")
+        assert decision.mode == ContextMode.NO_CONTEXT

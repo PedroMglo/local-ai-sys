@@ -47,6 +47,8 @@ def main() -> None:
     sync_group.add_argument("--all", action="store_true", dest="run_all", help="Tudo: embeddings + grafos")
     p_sync.add_argument("--force", action="store_true", help="Rebuild completo do grafo")
     p_sync.add_argument("--vault", metavar="NAME", help="Sincronizar apenas este vault (nome do directório)")
+    p_sync.add_argument("--system", action="store_true", default=False,
+                         help="Gerar snapshot estático do sistema (hardware, GPU, RAM, disco)")
 
     # --- rag serve ---
     sub.add_parser("serve", help="Iniciar API REST (porta 8484)")
@@ -120,6 +122,7 @@ def main() -> None:
     elif args.command == "sync":
         from obsidian_rag.pipeline.sync import sync_graphify, sync_local
         vault = getattr(args, "vault", None)
+        do_system = getattr(args, "system", False)
         if args.local:
             sync_local(vault_filter=vault)
         elif args.graph:
@@ -128,6 +131,9 @@ def main() -> None:
             sync_local(vault_filter=vault)
             print()
             sync_graphify(force=args.force)
+        if do_system:
+            from obsidian_rag.pipeline.sync import sync_system_snapshot
+            sync_system_snapshot()
 
     elif args.command == "serve":
         from obsidian_rag.api.app import serve
