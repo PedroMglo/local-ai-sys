@@ -1,6 +1,6 @@
 # IMPROVEMENTS AND RISKS — obsidian-rag
 
-> **Versão:** 0.5.3 → v1.1 (plano)
+> **Versão:** 0.5.4 → v1.1 (plano)
 > **Última atualização:** 2026-05-12
 > **Âmbito:** Análise crítica de falhas, riscos, melhorias e roadmap
 
@@ -33,7 +33,7 @@
 | **Complexidade**       | Média                                                                 |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`                                            |
 
-**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 436 testes (4 skipped) em 23 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 18 para graphify incremental + 16 para multi-vault + 4 para concorrência). Faltam integration tests e2e com Ollama.
+**Resolução (2026-05-10):** Implementados 83 unit tests com pytest em 5 ficheiros (`test_chunking_markdown.py`, `test_chunking_code.py`, `test_router.py`, `test_budget.py`, `test_api.py`) + `conftest.py` com fixtures partilhadas. Dependências de dev adicionadas ao `pyproject.toml` (`pytest>=8.0`, `pytest-asyncio>=0.23`, `coverage>=7.0`). Todos os testes passam em <1s sem dependências externas (Ollama). Total atual: 389 testes passam (1 falha pré-existente por Qdrant version mismatch, 3 skipped) em 23 ficheiros (inclui 42 novos testes para vault_sync + cross-platform security + 25 para manifest + 10 para ingest pipeline + 21 para ResourceGovernor + 34 para VectorStore protocol + 22 para tree-sitter chunking + 6 para Dask engine + 18 para graphify incremental + 16 para multi-vault + 4 para concorrência). Faltam integration tests e2e com Ollama.
 
 ### 1.2 ~~Singletons mutáveis para coleções do vector store~~ ✅ RESOLVIDO
 
@@ -608,9 +608,9 @@ A arquitetura é single-process (uvicorn sem workers configurados). O httpx pool
 
 O código está bem organizado em módulos temáticos (`cli/`, `chunking/`, `embeddings/`, `retrieval/`, `graph/`, `store/`, `api/`, `pipeline/`, `prompts/`). A separação de responsabilidades é clara.
 
-### 9.2 Config centralizada com lazy loading (positivo)
+### 9.2 Config dividida em dois ficheiros com lazy loading (positivo)
 
-Toda a configuração está em `rag.toml` com env overrides, frozen dataclasses e path resolution. Desde v0.4.0, `settings` é um `_LazySettings` proxy que só carrega no primeiro acesso, permitindo que `rag init` e `rag doctor` funcionem sem `rag.toml`. Helper `config_exists()` adicionado.
+A configuração é dividida em `rag.user.toml` (personalizações do utilizador) e `rag.internal.toml` (defaults técnicos), com merge automático. Env overrides com prefixo `RAG_` têm prioridade máxima. Desde v0.4.0, `settings` é um `_LazySettings` proxy que só carrega no primeiro acesso, permitindo que `rag init` e `rag doctor` funcionem sem `rag.user.toml`. Helper `config_exists()` adicionado.
 
 ### 9.3 CLI unificado (positivo — v0.4.0)
 
@@ -640,7 +640,7 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | **Complexidade**       | Média                                  |
 | **Ficheiros afetados** | `tests/`, `pyproject.toml`             |
 
-**Resolução (2026-05-10):** 329 testes (18 skipped) implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority + 42 vault_sync/cross-platform + 25 manifest + 10 ingest pipeline + 21 governor + 34 vector store protocol + 22 tree-sitter chunking + 6 dask engine + 18 graphify incremental). Total actual: 436 testes (4 skipped) em 23 ficheiros. Cobertura de chunking (markdown + code + tree-sitter multi-linguagem), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation (cross-platform), bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout, vault_sync backends (direct/python/rsync/auto), exclude patterns, incremental copy, delete_missing, `IngestManifest` (SQLite CRUD, crash recovery), `IngestPipeline` (bounded stages, backpressure), `ResourceGovernor` (thresholds, lifecycle, wait_until_safe, metrics JSONL, tuning backward compat), `VectorStore` protocol (upsert, query, delete, count, collection isolation, factory, Qdrant embedded/server, health), Dask engine factory (`create_parser_pool`, `DaskParserPool`), graphify incremental (`_file_md5`, `_detect_changes`, `build_graph` 3-tier), concorrência (parallel queries, query during upsert, multi-collection, health under load) e integration tests com TestClient + QdrantVectorStore in-memory. Fixtures partilhadas em `conftest.py`. Testes de concorrência com Qdrant server validados em CI via `test-server-mode` job.
+**Resolução (2026-05-10):** 329 testes (18 skipped) implementados com pytest (83 unit iniciais + funcionalidades médias + 16 integration + CLI dispatch + init + security + 10 performance + 16 adaptive top_k + 27 low-priority + 42 vault_sync/cross-platform + 25 manifest + 10 ingest pipeline + 21 governor + 34 vector store protocol + 22 tree-sitter chunking + 6 dask engine + 18 graphify incremental). Total actual: 389 testes passam (1 falha pré-existente por Qdrant version mismatch, 3 skipped) em 23 ficheiros. Cobertura de chunking (markdown + code + tree-sitter multi-linguagem), router heuristic, budget allocation, API auth, backup, sync paralelo, logging JSON, tokenizer regex, CLI dispatcher, path validation (cross-platform), bind validation, `PerformanceConfig`, `auto_tune`, `should_throttle`, `_estimate_complexity`, adaptive top_k scaling, thread-safe singletons, Unicode normalization, bilingual stop words, `__all__` exports, reranker cache, embedding timeout, vault_sync backends (direct/python/rsync/auto), exclude patterns, incremental copy, delete_missing, `IngestManifest` (SQLite CRUD, crash recovery), `IngestPipeline` (bounded stages, backpressure), `ResourceGovernor` (thresholds, lifecycle, wait_until_safe, metrics JSONL, tuning backward compat), `VectorStore` protocol (upsert, query, delete, count, collection isolation, factory, Qdrant embedded/server, health), Dask engine factory (`create_parser_pool`, `DaskParserPool`), graphify incremental (`_file_md5`, `_detect_changes`, `build_graph` 3-tier), concorrência (parallel queries, query during upsert, multi-collection, health under load) e integration tests com TestClient + QdrantVectorStore in-memory. Fixtures partilhadas em `conftest.py`. Testes de concorrência com Qdrant server validados em CI via `test-server-mode` job.
 
 ### 10.2 ~~Autenticação da API~~ ✅ RESOLVIDO
 
@@ -1114,6 +1114,34 @@ Desde v0.4.0, existe um único entry point `rag` com subcomandos em vez de 5 com
 | 202 | ~~`test_concurrency.py` (novo): `TestParallelQueries`, `TestQueryDuringUpsert`, `TestMultiCollectionUpsert`, `TestHealthUnderLoad`~~  | Média        | ✅ Concluído |
 
 > **Fase 21 concluída em 2026-05-12.** Concorrência real com Qdrant server mode para suportar múltiplos modelos AI a fazer queries RAG simultaneamente via orquestrador. Qdrant embedded tinha exclusividade de file-lock que causava deadlocks e timeouts sob acesso concorrente. A solução centraliza o store num singleton process-wide (`get_store()`) com `threading.Lock`, adiciona retry com exponential backoff em todos os API calls, implementa `health()` no VectorStore Protocol, e configura server mode como default em `rag.toml`. Docker Compose com healthcheck, limites de memória e tuning mmap. CI com job dedicado `test-server-mode` usando Qdrant service container. 4 novos testes de concorrência + `TestHealth`. Baseline: 369 chunks em `code_repos`. 436 testes passam (4 skipped). Ficheiros afetados: `docker-compose.yml`, `qdrant_store.py`, `base.py`, `store/__init__.py` (novo conteúdo), `rag.py`, `sync.py`, `rag.toml`, `Makefile`, `.github/workflows/ci.yml`, `test_vector_store.py`, `test_concurrency.py` (novo).
+
+---
+
+### Fase 22 — Prompts EN, multi-turn context, router heuristic improvements (v0.5.4, 2026-05-12) ✅
+
+| #   | Tarefa                                                                                                                                                                                                                                                                     | Complexidade | Estado       |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ |
+| 203 | ~~`templates.py`: prompts model-internal convertidos para inglês — `ROUTER_SYSTEM`, `ROUTER_USER_TEMPLATE` (6 exemplos EN), `REWRITE_SYSTEM` (inclui descrição do domínio da KB), `RAG_CONTEXT_INSTRUCTION` (anti-hallucination, context-over-general-knowledge)~~         | Média        | ✅ Concluído |
+| 204 | ~~`templates.py`: `GRAPH_CONTEXT_INSTRUCTION` (direcção explícita, impact chains), `COMBINED_CONTEXT_INSTRUCTION` (labels `[SEMANTIC]`/`[STRUCTURAL]`), `FALLBACK_WEAK_CONTEXT` (`[SYSTEM NOTE]` anti-echo guard). `SYSTEM_GENERAL` mantido em PT-PT (user-facing)~~       | Média        | ✅ Concluído |
+| 205 | ~~`rag.py`: labels de contexto alterados de PT para EN — `[CONTEXTO DAS NOTAS PESSOAIS]` → `[SEMANTIC — PERSONAL NOTES]`, `[CONTEXTO DO CÓDIGO — repo]` → `[SEMANTIC — CODE: repo]`. Trace rejection reasons em inglês~~                                                   | Baixa        | ✅ Concluído |
+| 206 | ~~`router.py`, `intent.py`, `rag.py`, `app.py`: parâmetro `history` para multi-turn context awareness — `route_query()`, `_llm_route()`, `detect_intent_full()`, `build_rag_context()` aceitam `history`. `/chat` endpoint passa mensagens anteriores ao router~~          | Média        | ✅ Concluído |
+| 207 | ~~`router.py`: LLM router inclui até 2 mensagens recentes do utilizador como contexto para detecção de follow-ups~~                                                                                                                                                        | Baixa        | ✅ Concluído |
+| 208 | ~~`router.py`: heurística expandida — novas keywords PT+EN (pipeline, codebase, workspace, modelfile, installed, configured, alias, functions) e padrões multi-palavra ("este projeto", "o meu pipeline", "this project", "my pipeline", etc.). Reason strings em inglês~~ | Baixa        | ✅ Concluído |
+| 209 | ~~`rag.toml`: `coder-pt` RAG enabled: `false` → `true`. `token_budget`: 4000 → 6000~~                                                                                                                                                                                      | Baixa        | ✅ Concluído |
+
+> **Fase 22 concluída em 2026-05-12.** Cinco melhorias complementares de qualidade de retrieval e UX do chat:
+>
+> **(1) Prompts model-internal em inglês.** Todos os prompts que instruem o LLM internamente (router, rewrite, RAG context, graph context, combined context, fallback) foram convertidos de PT-PT para inglês. Motivação: modelos Ollama (gemma3, qwen3, deepseek-r1) seguem instruções em inglês com maior precisão e consistência. O `SYSTEM_GENERAL` (user-facing) mantém-se em PT-PT para que as respostas ao utilizador continuem em português. Política de língua dual documentada no docstring do módulo.
+>
+> **(2) Multi-turn context awareness.** `route_query()`, `_llm_route()`, `detect_intent_full()` e `build_rag_context()` aceitam agora um parâmetro `history: list[dict] | None`. O endpoint `/chat` em `app.py` constrói `prev_messages` a partir das mensagens anteriores e passa-o ao `build_rag_context()`. O LLM router inclui até 2 mensagens recentes do utilizador no prompt para detectar follow-ups ("e sobre o deploy?", "mostra mais detalhes") que antes eram classificados como `NO_CONTEXT` por falta de contexto conversacional.
+>
+> **(3) Router heuristic expandida.** `_LOCAL_SIGNALS` enriquecido com keywords bilingues: pipeline, codebase, workspace, modelfile/modelfiles, instalado/installed, configurado/configured, alias/aliases, funções/functions. `_GRAPH_PATTERNS` enriquecido com padrões multi-palavra PT+EN: "este projeto", "o meu pipeline", "this project", "my pipeline", etc. Todas as reason strings das `RoutingDecision` heurísticas convertidas para inglês.
+>
+> **(4) Context block labels em EN.** Em `rag.py`, os blocos de contexto injetados no prompt mudaram de `[CONTEXTO DAS NOTAS PESSOAIS]` para `[SEMANTIC — PERSONAL NOTES]` e de `[CONTEXTO DO CÓDIGO — repo]` para `[SEMANTIC — CODE: repo]`. Consistente com os prompts EN e com os labels `[SEMANTIC]`/`[STRUCTURAL]` definidos em `COMBINED_CONTEXT_INSTRUCTION`.
+>
+> **(5) Configuração.** `coder-pt` RAG habilitado (`true`) — o modelo coder recebe agora contexto local quando relevante. `token_budget` aumentado de 4000 para 6000 — permite injetar mais contexto antes de truncar, melhorando respostas para queries complexas.
+>
+> **Testes:** 389 passed, 1 pre-existing failure (Qdrant version mismatch), 3 skipped. Ficheiros afetados: `prompts/templates.py`, `retrieval/router.py`, `retrieval/intent.py`, `retrieval/rag.py`, `api/app.py`, `rag.toml`.
 
 ---
 

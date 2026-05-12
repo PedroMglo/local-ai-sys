@@ -40,7 +40,7 @@ Os dados ficam persistidos em `./data/qdrant_server/`.
 
 ---
 
-## 2. Configurar `rag.toml`
+## 2. Configurar `rag.user.toml`
 
 Altera a secção `[store]`:
 
@@ -74,7 +74,7 @@ compatível com o servidor.
 # 1. Garantir que o servidor Qdrant está a correr
 docker compose --profile qdrant up -d
 
-# 2. Configurar qdrant_url no rag.toml (passo 2 acima)
+# 2. Configurar qdrant_url no rag.user.toml (passo 2 acima)
 
 # 3. Re-indexar tudo
 rag sync --all
@@ -175,4 +175,4 @@ ports:
 
 > **Segurança**: O Qdrant não tem autenticação por defeito.
 > Se expor na LAN, configura `QDRANT__SERVICE__API_KEY` e usa
-> `qdrant_api_key` no `rag.toml`.
+> `qdrant_api_key` no `rag.user.toml`.
