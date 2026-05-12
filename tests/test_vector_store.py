@@ -31,9 +31,31 @@ def _make_qdrant():
         pytest.skip(f"Qdrant server not available at {_QDRANT_TEST_URL}: {exc}")
 
 
+_TEST_COLLECTIONS = [
+    "test_col", "test_ids", "test_del", "test_delex",
+    "test_query", "test_fields", "test_empty_q", "test_self",
+    "test_filter", "test_nofilt", "alpha", "beta",
+    "test_sparse", "test_nosparse", "test_hybrid",
+    "test_denseonly", "test_emptysp",
+]
+
+
 @pytest.fixture
 def store() -> VectorStore:
-    return _make_qdrant()
+    s = _make_qdrant()
+    # Pre-test cleanup: remove leftover collections from previous runs
+    for col in _TEST_COLLECTIONS:
+        try:
+            s._client.delete_collection(col)
+        except Exception:
+            pass
+    yield s
+    # Post-test cleanup
+    for col in _TEST_COLLECTIONS:
+        try:
+            s._client.delete_collection(col)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

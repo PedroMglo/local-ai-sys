@@ -30,9 +30,19 @@ def _fake_embedding(seed: int = 0) -> list[float]:
 
 
 def _make_qdrant_store(tmp_path):
-    """Create an in-memory QdrantVectorStore."""
+    """Create a QdrantVectorStore backed by an in-memory Qdrant client.
+
+    Bypasses QdrantVectorStore.__init__ (which requires a server URL) and
+    injects a QdrantClient(":memory:") directly — no server required.
+    """
     from obsidian_rag.store.qdrant_store import QdrantVectorStore
-    return QdrantVectorStore(data_dir=tmp_path / "qdrant_test")
+    from qdrant_client import QdrantClient, models as qdrant_models
+
+    store = object.__new__(QdrantVectorStore)
+    store._client = QdrantClient(":memory:")
+    store._models = qdrant_models
+    store._ensured = set()
+    return store
 
 
 def _populate_store(store, collection: str, docs: list[dict]):
