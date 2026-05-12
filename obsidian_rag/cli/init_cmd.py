@@ -253,18 +253,21 @@ def _generate_toml(
     api_key: str,
     sync_backend: str = "direct",
 ) -> str:
-    """Generate rag.toml content with the current schema."""
+    """Generate rag.user.toml content with user-facing settings only.
+
+    Technical defaults live in rag.internal.toml and are merged at load time.
+    """
     repo_paths = ", ".join(f'"{r}"' for r in repos)
     model_lines = "\n".join(f'"{name}" = {str(enabled).lower()}' for name, enabled in models.items())
 
-    return f'''# Obsidian RAG — Configuração Central
+    return f'''# Obsidian RAG — Configuração do Utilizador
 # Gerado por: rag init
-# Todas as opções podem ser overridden via env vars com prefixo RAG_
+# Edita este ficheiro para personalizar o teu setup.
+# Defaults técnicos estão em rag.internal.toml (não editar).
+# Env vars com prefixo RAG_ sobrepõem ambos os ficheiros.
 # Ex: RAG_RETRIEVAL_TOP_K=15 sobrepõe [retrieval] top_k
 
 [paths]
-source_dir = "source"           # staging dir (usado apenas quando sync.backend ≠ direct)
-data_dir = "data/qdrant"
 vault_dir = "{vault_dir}"       # fonte principal dos dados Obsidian
 
 [sync]
@@ -274,30 +277,15 @@ vault_dir = "{vault_dir}"       # fonte principal dos dados Obsidian
 #   rsync  — usa rsync para copiar (Linux/macOS, mais rápido para vaults grandes)
 #   auto   — rsync se disponível, senão python
 backend = "{sync_backend}"
-delete_missing = true           # remover de source_dir ficheiros apagados do vault
-follow_symlinks = false
 
 [ollama]
 base_url = "{ollama_url}"
 embedding_model = "bge-m3"
 
-[chunking]
-max_chars = 2000
-overlap_chars = 200
-min_chars = 50
-strip_frontmatter = true
-contextual_prefix = true
-
 [retrieval]
 top_k = 10
-score_threshold = 0.45
-dynamic_threshold_ratio = 0.75
-embedding_cache_size = 128
 context_mode = "auto"
 token_budget = 4000
-graph_max_neighbors = 5
-graph_max_communities = 3
-graph_cache_ttl = 300
 
 [api]
 host = "{host}"
@@ -313,18 +301,10 @@ chat_rate_limit = 20
 [router]
 enabled = true
 model = "gemma3:4b"
-timeout = 15.0
 
 [reranker]
 enabled = false
 model = "gemma3:4b"
-top_k_candidates = 30
-min_score = 0.3
-
-[context_policy]
-min_relevance_score = 0.50
-min_relevant_chunks = 1
-log_weak_context = true
 
 [debug]
 enabled = false
@@ -332,25 +312,17 @@ log_to_file = false
 log_level = "INFO"
 log_format = "text"
 
-[pipeline]
-max_workers = 4
+[store]
+qdrant_url = "http://localhost:6333"
+qdrant_api_key = ""
 
 [repos]
 paths = [{repo_paths}]
-collection_name = "code_repos"
-
-[repos.chunking]
-strategy = "ast"
-max_chars = 2000
-overlap_chars = 200
-min_chars = 80
-contextual_prefix = true
 
 [graphify]
 enabled = false
 backend = "ollama"
 model = ""
-output_dir = "data/graphify"
 graph_vault_dir = "~/Obsidian/knowledge-graphs"
 auto_update = false
 '''
@@ -366,7 +338,7 @@ def run_init(args: Namespace) -> None:
 
     # Check existing config
     if config_exists():
-        if not _ask_yn("rag.toml já existe. Recriar?", default=False, auto_yes=auto):
+        if not _ask_yn("rag.user.toml já existe. Recriar?", default=False, auto_yes=auto):
             print("Setup cancelado.")
             sys.exit(0)
 
@@ -483,9 +455,9 @@ def run_init(args: Namespace) -> None:
         sync_backend=sync_backend,
     )
 
-    toml_path = PROJECT_ROOT / "rag.toml"
+    toml_path = PROJECT_ROOT / "rag.user.toml"
     toml_path.write_text(toml_content, encoding="utf-8")
-    print(f"✓ Configuração escrita em {toml_path}")
+    print(f"✓ Configuração do utilizador escrita em {toml_path}")
 
     # --- Create directories ---
     dirs_to_create = ["data/qdrant", "data/graphify"]

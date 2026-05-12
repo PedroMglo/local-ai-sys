@@ -1,4 +1,4 @@
-"""Configuração centralizada — carrega rag.toml com suporte a env overrides."""
+"""Configuração centralizada — carrega rag.internal.toml + rag.user.toml com suporte a env overrides."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ from pathlib import Path
 
 
 def _find_project_root() -> Path:
-    """Walk up from this file to find rag.toml, or check CWD."""
+    """Walk up from this file to find rag.user.toml or rag.internal.toml, or check CWD."""
     current = Path(__file__).resolve().parent.parent
-    if (current / "rag.toml").exists():
+    if (current / "rag.user.toml").exists() or (current / "rag.internal.toml").exists():
         return current
     # Check current working directory (useful in containers)
     cwd = Path.cwd()
-    if (cwd / "rag.toml").exists():
+    if (cwd / "rag.user.toml").exists() or (cwd / "rag.internal.toml").exists():
         return cwd
     # fallback: home-based path
     return Path.home() / "ai-local" / "obsidian-rag"
@@ -24,12 +24,42 @@ def _find_project_root() -> Path:
 PROJECT_ROOT = _find_project_root()
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Deep merge override into base; override wins at every key level."""
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
 def _load_toml() -> dict:
-    toml_path = PROJECT_ROOT / "rag.toml"
-    if not toml_path.exists():
-        raise FileNotFoundError(f"Config não encontrado: {toml_path}")
-    with open(toml_path, "rb") as f:
-        return tomllib.load(f)
+    """Load config by merging rag.internal.toml + rag.user.toml.
+
+    Priority (highest to lowest): env vars > rag.user.toml > rag.internal.toml > code defaults.
+    """
+    internal_path = PROJECT_ROOT / "rag.internal.toml"
+    user_path = PROJECT_ROOT / "rag.user.toml"
+
+    base: dict = {}
+    if internal_path.exists():
+        with open(internal_path, "rb") as f:
+            base = tomllib.load(f)
+
+    if user_path.exists():
+        with open(user_path, "rb") as f:
+            user = tomllib.load(f)
+        return _deep_merge(base, user)
+
+    if base:
+        return base
+
+    raise FileNotFoundError(
+        f"Config não encontrado em {PROJECT_ROOT}. "
+        "Cria rag.user.toml ou executa: rag init"
+    )
 
 
 def _env_override(section: str, key: str, default):
@@ -234,7 +264,7 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    """Load settings from rag.toml with env var overrides."""
+    """Load settings from rag.internal.toml + rag.user.toml with env var overrides."""
     raw = _load_toml()
 
     p = raw.get("paths", {})
@@ -433,15 +463,15 @@ def load_settings() -> Settings:
 
 
 def config_exists() -> bool:
-    """Check if rag.toml exists without loading it."""
-    return (PROJECT_ROOT / "rag.toml").exists()
+    """Check if rag.user.toml exists without loading it."""
+    return (PROJECT_ROOT / "rag.user.toml").exists()
 
 
 class _LazySettings:
     """Proxy that defers load_settings() until first attribute access.
 
     Allows ``from obsidian_rag.config import settings`` without crashing
-    when rag.toml does not exist yet (e.g. before ``rag init``).
+    when rag.user.toml does not exist yet (e.g. before ``rag init``).
     """
 
     _instance: Settings | None = None

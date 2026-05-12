@@ -50,6 +50,8 @@ source/
 *.pem
 *.secret
 secrets/
+# User config may contain API keys and personal vault paths — never commit
+rag.user.toml
 
 # --- IDE / editors ---
 .vscode/
