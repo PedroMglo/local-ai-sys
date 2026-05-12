@@ -6,7 +6,8 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
-      - ./rag.toml:/app/rag.toml:ro
+      - ./rag.internal.toml:/app/rag.internal.toml:ro
+      - ./rag.user.toml:/app/rag.user.toml:ro
     environment:
       - RAG_OLLAMA_BASE_URL=http://host.docker.internal:11434
       # HOST=0.0.0.0 dentro do container para ouvir na interface — a exposição real é controlada por "ports" acima
@@ -20,7 +21,7 @@ services:
 
   # Qdrant vector database — server mode para concorrência real
   # Start with: docker compose --profile qdrant up -d
-  # Depois:     rag.toml → qdrant_url = "http://localhost:6333"
+  # Depois:     rag.user.toml → qdrant_url = "http://localhost:6333"
   qdrant:
     image: qdrant/qdrant:v1.13.2
     ports:

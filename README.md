@@ -62,7 +62,7 @@ rag doctor
 
 | Comando                   | Descrição                                                  |
 | ------------------------- | ---------------------------------------------------------- |
-| `rag init`                | Configuração interactiva (gera `rag.toml`)                 |
+| `rag init`                | Configuração interactiva (gera `rag.user.toml`)            |
 | `rag up`                  | Verificar sistema e iniciar API                            |
 | `rag doctor`              | Diagnóstico completo com ✓/✗                               |
 | `rag sync -l`             | Sync embeddings (notas + repos, incremental)               |
@@ -86,9 +86,14 @@ rag doctor
 
 ---
 
-## Configuração (`rag.toml`)
+## Configuração (`rag.user.toml`)
 
-O `rag init` cria a configuração interactivamente. Para editar manualmente:
+A configuração é dividida em dois ficheiros:
+
+- `rag.user.toml` — personalizações do utilizador (edita este)
+- `rag.internal.toml` — defaults técnicos (não editar)
+
+O `rag init` cria `rag.user.toml` interactivamente. Para editar manualmente:
 
 ```toml
 [paths]
@@ -225,9 +230,10 @@ curl -s http://localhost:6333/healthz
 make qdrant-down
 ```
 
-Configura `qdrant_url = "http://localhost:6333"` em `rag.toml` — todos os comandos (`rag sync`, `rag serve`, `rag query`) passam a usar o server automaticamente.
+Configura `qdrant_url = "http://localhost:6333"` em `rag.user.toml` — todos os comandos (`rag sync`, `rag serve`, `rag query`) passam a usar o server automaticamente.
 
 **Tuning de memória** (já configurado no `docker-compose.yml`):
+
 - `mem_limit: 512m` — cap duro de RAM
 - `QDRANT__STORAGE__ON_DISK_PAYLOAD=true` — metadata em disco
 - `QDRANT__STORAGE__MMAP_THRESHOLD_KB=20480` — índice via mmap em idle
@@ -239,7 +245,7 @@ O Ollama deve correr no host. O container acede-lhe via `host.docker.internal:11
 ## Segurança
 
 - **Bind local:** API em `127.0.0.1` por defeito — recusa `0.0.0.0` sem `api_key`
-- **Autenticação:** Bearer token via `api_key` em `rag.toml` (timing-safe)
+- **Autenticação:** Bearer token via `api_key` em `rag.user.toml` (timing-safe)
 - **Rate limiting:** configurável por minuto (global + `/chat`)
 - **Validação de input:** Pydantic com limites em todos os endpoints
 - **Paths seguros:** `rag init` recusa indexar `/`, `~`, `.ssh`, `.gnupg` e dirs de sistema (cross-platform)
@@ -255,7 +261,7 @@ O Ollama deve correr no host. O container acede-lhe via `host.docker.internal:11
 rag doctor
 ```
 
-Verifica: Python, virtualenv, dependências, `rag.toml`, paths, Ollama, modelos, Qdrant, permissões, Graphify.
+Verifica: Python, virtualenv, dependências, `rag.user.toml`, paths, Ollama, modelos, Qdrant, permissões, Graphify.
 
 ---
 
@@ -343,7 +349,7 @@ rag up
 
 **Sync automático:** `rag schedule install` cria uma tarefa no Task Scheduler.
 
-No `rag.toml`, usar barras normais: `vault_dir = "C:/Users/nome/Obsidian/Vault"`.
+No `rag.user.toml`, usar barras normais: `vault_dir = "C:/Users/nome/Obsidian/Vault"`.
 
 **Alternativa:** WSL2 (`wsl --install -d Ubuntu`) e seguir instruções Linux.
 
@@ -384,12 +390,12 @@ Git Repos ──────────────► Chunking (AST Python) �
                     └─────────────────────┘
 ```
 
-| Componente      | Tecnologia                                                                              |
-| --------------- | --------------------------------------------------------------------------------------- |
-| Embeddings      | Ollama `bge-m3` (multilíngue, 1024d, local)                                             |
-| Vector Store    | Qdrant server mode — Docker container :6333 (cosine, persistent)                        |
+| Componente      | Tecnologia                                                                             |
+| --------------- | -------------------------------------------------------------------------------------- |
+| Embeddings      | Ollama `bge-m3` (multilíngue, 1024d, local)                                            |
+| Vector Store    | Qdrant server mode — Docker container :6333 (cosine, persistent)                       |
 | Vault Sync      | direct (leitura in-place) / python (incremental) / rsync (Linux/macOS)                 |
-| Code Chunking   | `ast.parse()` stdlib — zero dependências externas                                       |
-| Knowledge Graph | Graphify com backend Ollama (opt-in)                                                    |
-| API             | FastAPI + uvicorn — singleton `get_store()` thread-safe, retry com exponential backoff  |
-| Graph Query     | NetworkX (leitura local de `graph.json`)                                                |
+| Code Chunking   | `ast.parse()` stdlib — zero dependências externas                                      |
+| Knowledge Graph | Graphify com backend Ollama (opt-in)                                                   |
+| API             | FastAPI + uvicorn — singleton `get_store()` thread-safe, retry com exponential backoff |
+| Graph Query     | NetworkX (leitura local de `graph.json`)                                               |

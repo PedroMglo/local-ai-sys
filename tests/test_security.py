@@ -85,10 +85,10 @@ class TestBindSecurity:
 
 
 class TestConfigLazyLoading:
-    """settings must not crash on import when rag.toml is missing."""
+    """settings must not crash on import when rag.user.toml is missing."""
 
     def test_import_config_without_toml(self, tmp_path, monkeypatch):
-        """Importing settings should not raise when rag.toml doesn't exist."""
+        """Importing settings should not raise when rag.user.toml doesn't exist."""
         monkeypatch.setattr("obsidian_rag.config.PROJECT_ROOT", tmp_path)
         # Reset singleton
         from obsidian_rag import config
@@ -102,7 +102,7 @@ class TestConfigLazyLoading:
         assert config_exists() is False
 
     def test_config_exists_true(self, tmp_path, monkeypatch):
-        (tmp_path / "rag.toml").write_text("[paths]\n")
+        (tmp_path / "rag.user.toml").write_text("[paths]\n")
         monkeypatch.setattr("obsidian_rag.config.PROJECT_ROOT", tmp_path)
         from obsidian_rag.config import config_exists
         assert config_exists() is True

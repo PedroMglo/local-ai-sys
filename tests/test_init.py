@@ -48,7 +48,7 @@ class TestDangerousPathValidation:
 
 
 class TestTomlGeneration:
-    """Validate generated rag.toml content."""
+    """Validate generated rag.user.toml content."""
 
     def test_generates_valid_toml(self):
         content = _generate_toml(
@@ -62,7 +62,7 @@ class TestTomlGeneration:
         # Must be parseable TOML
         parsed = tomllib.loads(content)
         assert parsed["paths"]["vault_dir"] == "~/Obsidian/Vault"
-        assert parsed["paths"]["source_dir"] == "source"
+        assert "source_dir" not in parsed.get("paths", {})
         assert parsed["ollama"]["base_url"] == "http://localhost:11434"
         assert parsed["api"]["host"] == "127.0.0.1"
         assert parsed["api"]["api_key"] == ""

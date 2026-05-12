@@ -56,7 +56,7 @@ Symlinks são resolvidos antes da validação (e.g. `/bin` → `/usr/bin`).
 
 - Container corre como user não-root (`rag`, UID 1000)
 - Volume `data/` é o único directório writable
-- `rag.toml` montado em read-only
+- `rag.user.toml` e `rag.internal.toml` montados em read-only
 - Porta publicada em `127.0.0.1` por defeito no `docker-compose.yml`
 - `HEALTHCHECK` integrado no Dockerfile
 
@@ -66,7 +66,7 @@ Esta política cobre:
 
 - Código Python em `obsidian_rag/`
 - Dockerfile e docker-compose.yml
-- Configuração (`rag.toml`, variáveis de ambiente)
+- Configuração (`rag.user.toml`, `rag.internal.toml`, variáveis de ambiente)
 - Workflows GitHub Actions
 
 **Fora de scope:**
@@ -78,7 +78,7 @@ Esta política cobre:
 ## Recomendações de utilização segura
 
 1. **Não expor a API sem autenticação** — se usares `host = "0.0.0.0"`, define sempre `api_key`
-2. **Não indexar directórios sensíveis** — o `rag init` bloqueia os mais óbvios, mas verifica o teu `rag.toml`
+2. **Não indexar directórios sensíveis** — o `rag init` bloqueia os mais óbvios, mas verifica o teu `rag.user.toml`
 3. **Manter dependências actualizadas** — Dependabot cria PRs automáticos para vulnerabilidades conhecidas
 4. **Usar Docker com defaults** — o `docker-compose.yml` já tem bind local e read-only config
-5. **Não commitar `.env` ou `rag.toml` com secrets** — ambos estão no `.gitignore`
+5. **Não commitar `.env` ou `rag.user.toml` com secrets** — ambos estão no `.gitignore`

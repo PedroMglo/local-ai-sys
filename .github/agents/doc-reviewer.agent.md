@@ -62,7 +62,7 @@ Classifica cada melhoria com:
 
 1. Analisa a estrutura completa do projeto antes de escrever.
 2. Identifica linguagens, frameworks, dependências e ferramentas usadas.
-3. Lê ficheiros de configuração (`rag.toml`, `pyproject.toml`), scripts, README e código principal.
+3. Lê ficheiros de configuração (`rag.user.toml`, `rag.internal.toml`, `pyproject.toml`), scripts, README e código principal.
 4. Identifica modelos de AI, agentes, prompts, integrações com Ollama, pipelines RAG, embeddings, bases de dados vetoriais.
 5. **Não inventes informação.** Quando algo não estiver claro, marca como `A confirmar`.
 6. Usa linguagem técnica, objetiva e organizada.

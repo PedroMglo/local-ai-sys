@@ -16,7 +16,7 @@ class TestPerformanceConfigDefaults:
     """PerformanceConfig with no [performance] section → safe defaults."""
 
     def test_defaults_without_section(self, tmp_path):
-        """rag.toml without [performance] loads with defaults."""
+        """Config without [performance] section loads with defaults."""
         toml_content = b"""
 [paths]
 source_dir = "source"
@@ -27,7 +27,7 @@ vault_dir = "/tmp/vault"
 base_url = "http://localhost:11434"
 embedding_model = "bge-m3"
 """
-        toml_file = tmp_path / "rag.toml"
+        toml_file = tmp_path / "rag.user.toml"
         toml_file.write_bytes(toml_content)
 
         with (
@@ -51,7 +51,7 @@ embedding_model = "bge-m3"
             assert s.performance.query_timeout_seconds == 30
 
     def test_explicit_values_parsed(self, tmp_path):
-        """rag.toml with [performance] section uses those values."""
+        """Config with [performance] section uses those values."""
         toml_content = b"""
 [paths]
 source_dir = "source"
@@ -70,7 +70,7 @@ max_parallel_jobs = 8
 embedding_batch_size = 200
 query_timeout_seconds = 60
 """
-        toml_file = tmp_path / "rag.toml"
+        toml_file = tmp_path / "rag.user.toml"
         toml_file.write_bytes(toml_content)
 
         with (
@@ -283,7 +283,7 @@ max_workers = 8
 [performance]
 auto_tune = true
 """
-        toml_file = tmp_path / "rag.toml"
+        toml_file = tmp_path / "rag.user.toml"
         toml_file.write_bytes(toml_content)
 
         with (

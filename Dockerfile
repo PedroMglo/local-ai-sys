@@ -27,7 +27,10 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY obsidian_rag/ obsidian_rag/
-COPY rag.toml .
+COPY rag.internal.toml .
+# rag.user.toml is typically mounted as a volume (see docker-compose.yml)
+# Copy it here only when building a pre-configured image
+COPY rag.user.toml .
 
 # Remove build tools not needed at runtime (fixes Trivy CVE-2026-23949, CVE-2026-24049)
 RUN pip install --no-cache-dir --upgrade setuptools wheel \
