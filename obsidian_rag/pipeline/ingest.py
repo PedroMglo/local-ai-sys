@@ -815,7 +815,7 @@ class IngestPipeline:
         bm25.save(model_path)
         log.info("BM25: fitted on %d docs, vocab=%d → %s", len(all_docs), bm25.vocab_size, model_path)
 
-        # 4. Generate sparse vectors and upsert in batches
+        # 4. Generate sparse vectors and update (not upsert!) to preserve dense vectors
         from obsidian_rag.store.qdrant_store import _str_to_uint
 
         models = store._models
@@ -827,7 +827,7 @@ class IngestPipeline:
                 sv = bm25.transform(tokens, doc_len=len(tokens))
                 if sv["indices"]:
                     points_update.append(
-                        models.PointStruct(
+                        models.PointVectors(
                             id=_str_to_uint(rid),
                             vector={
                                 "bm25": models.SparseVector(
@@ -838,7 +838,7 @@ class IngestPipeline:
                         )
                     )
             if points_update:
-                store._client.upsert(
+                store._client.update_vectors(
                     collection_name=collection,
                     points=points_update,
                 )
