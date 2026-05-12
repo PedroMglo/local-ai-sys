@@ -1,10 +1,15 @@
-"""Domain-neutral prompt templates for the local AI assistant.
+"""Prompt templates for the local AI assistant.
 
-All prompts are designed to be:
+Language policy:
+- UI / router / general-assistant prompts → Portuguese (PT-PT) — user-facing.
+- RAG context instructions / rewrite prompts → English — model-internal, better
+  comprehension and instruction-following from all supported Ollama models.
+
+All RAG prompts are designed to be:
+- Context-selective: only consume retrieved content when genuinely relevant
+- Anti-hallucination: explicit prohibition on fabricating absent details
+- Source-transparent: distinguish local knowledge from general training knowledge
 - Domain-agnostic: no bias toward any specific field
-- Language-aware: Portuguese (PT-PT) as primary
-- Context-selective: only use local context when relevant
-- Source-transparent: distinguish general knowledge from retrieved context
 """
 
 from __future__ import annotations
@@ -26,82 +31,95 @@ SYSTEM_GENERAL = (
 # =============================================================================
 
 ROUTER_SYSTEM = (
-    "Tu és um classificador de perguntas. O teu único trabalho é decidir "
-    "se uma pergunta precisa de contexto local (documentos pessoais, notas, "
-    "código, projetos) ou se pode ser respondida com conhecimento geral.\n\n"
-    "Classifica a pergunta numa das seguintes categorias:\n"
-    "- NO_CONTEXT: pergunta geral que pode ser respondida com conhecimento geral "
-    "(ex: factos, conceitos, definições, história, ciência, cultura, qualquer tema genérico)\n"
-    "- RAG_ONLY: a pergunta refere-se explicitamente a documentos pessoais, notas, "
-    "ficheiros, configurações, conteúdo indexado ou conhecimento local do utilizador\n"
-    "- GRAPH_ONLY: a pergunta é sobre relações, dependências, fluxos, "
-    "arquitectura ou estrutura de projetos/código locais\n"
-    "- RAG_AND_GRAPH: a pergunta precisa tanto de conteúdo local como de relações "
-    "estruturais entre componentes locais\n"
-    "- CLARIFY: a pergunta é ambígua e não é possível determinar se precisa de contexto local\n\n"
-    "Responde APENAS com uma linha no formato:\n"
-    "ROUTE: <categoria>\n"
-    "REASON: <razão breve em 1 frase>\n\n"
-    "Exemplos:\n"
-    'Pergunta: "O que é DNS?"\n'
+    "You are a query classifier. Your sole task is to decide whether a question "
+    "requires local context (personal documents, notes, code, projects) or can "
+    "be answered with general knowledge.\n\n"
+    "Classify the question into exactly one category:\n"
+    "- NO_CONTEXT: general question answerable from common knowledge "
+    "(facts, concepts, definitions, history, science, culture, any generic topic)\n"
+    "- RAG_ONLY: the question explicitly refers to personal documents, notes, "
+    "files, configurations, indexed content, or the user's local knowledge\n"
+    "- GRAPH_ONLY: the question is about relationships, dependencies, flows, "
+    "architecture, or structure of local projects/code\n"
+    "- RAG_AND_GRAPH: the question needs both local content and structural "
+    "relationships between local components\n"
+    "- CLARIFY: the question is ambiguous and it is impossible to determine "
+    "if local context is needed\n\n"
+    "Respond ONLY in this exact format (two lines, nothing else):\n"
+    "ROUTE: <category>\n"
+    "REASON: <brief reason in 1 sentence>\n\n"
+    "Examples:\n"
+    'Question: "What is DNS?"\n'
     "ROUTE: NO_CONTEXT\n"
-    "REASON: Pergunta de conhecimento geral sobre redes.\n\n"
-    'Pergunta: "Resume as minhas notas sobre DNS no Obsidian."\n'
+    "REASON: General networking knowledge question.\n\n"
+    'Question: "Summarize my notes about DNS in Obsidian."\n'
     "ROUTE: RAG_ONLY\n"
-    "REASON: Refere-se a notas pessoais do utilizador.\n\n"
-    'Pergunta: "Que componentes do meu projeto dependem do Qdrant?"\n'
+    "REASON: Refers to the user's personal notes.\n\n"
+    'Question: "Which components of my project depend on Qdrant?"\n'
     "ROUTE: RAG_AND_GRAPH\n"
-    "REASON: Pergunta sobre dependências num projeto local.\n\n"
-    'Pergunta: "Qual é a capital da Noruega?"\n'
+    "REASON: Asks about dependencies in a local project.\n\n"
+    'Question: "What is the capital of Norway?"\n'
     "ROUTE: NO_CONTEXT\n"
-    "REASON: Facto geográfico geral.\n\n"
-    'Pergunta: "O que dizem os meus documentos sobre quality gates?"\n'
+    "REASON: General geography fact.\n\n"
+    'Question: "What do my documents say about quality gates?"\n'
     "ROUTE: RAG_ONLY\n"
-    "REASON: Refere-se explicitamente a documentos locais.\n\n"
-    'Pergunta: "Como está organizada a arquitectura do meu repo?"\n'
+    "REASON: Explicitly references local documents.\n\n"
+    'Question: "How is my repo\'s architecture organized?"\n'
     "ROUTE: RAG_AND_GRAPH\n"
-    "REASON: Precisa de conteúdo local e relações estruturais.\n\n"
-    "Não incluas mais nada na resposta. Não expliques, não justifiques além da razão."
+    "REASON: Needs local content and structural relationships.\n\n"
+    "Do not include anything else in the response. "
+    "Do not explain or justify beyond the reason line."
 )
 
-ROUTER_USER_TEMPLATE = 'Pergunta: "{query}"'
+ROUTER_USER_TEMPLATE = 'Question: "{query}"'
 
 # =============================================================================
 # QUERY REWRITE PROMPT — Reformulates query for better embedding search
 # =============================================================================
 
 REWRITE_SYSTEM = (
-    "Tu és um reformulador de queries de pesquisa. "
-    "O teu trabalho é transformar a pergunta do utilizador numa versão "
-    "otimizada para pesquisa semântica numa base de conhecimento local.\n\n"
-    "Regras:\n"
-    "- Mantém o significado original\n"
-    "- Remove palavras desnecessárias (saudações, pedidos)\n"
-    "- Expande abreviações\n"
-    "- Adiciona sinónimos relevantes entre parênteses se útil\n"
-    "- Responde APENAS com a query reformulada, sem explicações\n"
-    "- Se a query já for boa para pesquisa, devolve-a tal como está"
+    "You are a search query optimizer for a local semantic knowledge base containing:\n"
+    "- Personal notes and documentation (Obsidian Vault, Markdown files)\n"
+    "- Source code repositories (Python, Bash, TypeScript)\n"
+    "- Technical configuration files and system logs\n"
+    "- Hardware, OS, and developer environment documentation\n\n"
+    "Transform the user's input into an optimized query for dense vector (embedding) retrieval.\n\n"
+    "Rules:\n"
+    "- Preserve the original intent exactly.\n"
+    "- Strip conversational framing, greetings, and filler words.\n"
+    "- Expand abbreviations when their expansion improves recall "
+    "(e.g., 'k8s' → 'kubernetes (k8s)').\n"
+    "- Add relevant technical synonyms in parentheses if they improve coverage "
+    "(e.g., 'repo (repository, codebase)').\n"
+    "- If the query mixes languages (Portuguese question about English technical content), "
+    "keep technical terms in their original language.\n"
+    "- If the query is already well-formed for search, return it unchanged.\n"
+    "- Output ONLY the rewritten query — no explanation, no prefix, no quotation marks."
 )
 
-REWRITE_USER_TEMPLATE = "Query original: {query}"
+REWRITE_USER_TEMPLATE = "Query: {query}"
 
 # =============================================================================
 # RAG ANSWER PROMPT — When local context is injected
 # =============================================================================
 
 RAG_CONTEXT_INSTRUCTION = (
-    "O contexto abaixo foi recuperado de fontes locais do utilizador "
-    "(notas pessoais, código fonte, documentação). "
-    "Usa este contexto para responder à pergunta quando relevante.\n\n"
-    "Regras:\n"
-    "- Responde directamente usando o conteúdo do contexto quando aplicável\n"
-    "- Distingue entre informação do contexto local e conhecimento geral\n"
-    "- Se usares informação do contexto, indica brevemente a origem "
-    '(ex: "de acordo com as tuas notas...", "no teu código...")\n'
-    "- Nunca digas ao utilizador para 'consultar um ficheiro' — apresenta a informação\n"
-    "- Se o contexto for parcial, usa o que tens e indica o que falta\n"
-    "- Se o contexto não for relevante para a pergunta, ignora-o e responde com conhecimento geral\n"
-    "- Não inventes detalhes que não estejam no contexto nem no teu conhecimento"
+    "The context below was retrieved from the user's local knowledge base via semantic search. "
+    "Sources include: personal notes (Obsidian), source code, technical documentation, "
+    "and configuration files.\n\n"
+    "Instructions:\n"
+    "- Answer using the retrieved context when it is relevant to the question.\n"
+    "- Cite the source naturally inline "
+    "(e.g., 'According to your notes…', 'In your codebase…').\n"
+    "- If only part of the context is relevant, use what applies and note any gaps.\n"
+    "- If the context is not relevant to the question, discard it and answer from "
+    "general knowledge instead.\n"
+    "- NEVER instruct the user to 'open a file' or 'check a document' — "
+    "extract and present the information directly.\n"
+    "- Do NOT fabricate details absent from both the retrieved context and your "
+    "training knowledge.\n"
+    "- When context and general knowledge conflict, prefer the context — "
+    "it reflects the user's actual setup."
 )
 
 # =============================================================================
@@ -109,13 +127,18 @@ RAG_CONTEXT_INSTRUCTION = (
 # =============================================================================
 
 GRAPH_CONTEXT_INSTRUCTION = (
-    "O contexto abaixo inclui informação estrutural sobre relações, "
-    "dependências e fluxos entre componentes do código/projetos locais do utilizador.\n\n"
-    "Regras:\n"
-    "- Explica as relações de forma clara e prática\n"
-    "- Quando mencionares dependências ou fluxos, sê específico sobre a direcção\n"
-    "- Se identificares impactos potenciais, menciona-os\n"
-    "- Não inventes relações que não estejam no contexto"
+    "The context below was retrieved from a local code knowledge graph. "
+    "It describes structural relationships: module dependencies, function call chains, "
+    "class hierarchies, and architectural flows across the user's local projects.\n\n"
+    "Instructions:\n"
+    "- Describe relationships with explicit direction "
+    "(e.g., 'module A imports B', 'X is consumed by Y').\n"
+    "- Name concrete components from the graph rather than speaking generically.\n"
+    "- Surface impact chains when relevant "
+    "(e.g., 'changing X will affect Y and Z downstream').\n"
+    "- If the graph data is sparse or incomplete, acknowledge the limitation "
+    "rather than speculating.\n"
+    "- Do NOT invent edges, dependencies, or relationships not present in the graph context."
 )
 
 # =============================================================================
@@ -123,16 +146,21 @@ GRAPH_CONTEXT_INSTRUCTION = (
 # =============================================================================
 
 COMBINED_CONTEXT_INSTRUCTION = (
-    "O contexto abaixo combina duas fontes locais do utilizador:\n"
-    "1. Conteúdo de notas pessoais e/ou código fonte (pesquisa semântica)\n"
-    "2. Relações estruturais entre componentes (knowledge graph)\n\n"
-    "Regras:\n"
-    "- Integra ambas as fontes para uma resposta completa\n"
-    "- O conteúdo dá o detalhe; as relações dão o contexto estrutural\n"
-    "- Indica quando informação vem de fontes diferentes\n"
-    "- Responde directamente — não digas ao utilizador para consultar ficheiros\n"
-    "- Se alguma fonte não for relevante para a pergunta, ignora-a\n"
-    "- Não inventes detalhes ausentes"
+    "The context below combines two local knowledge sources:\n"
+    "[SEMANTIC] — Content retrieved via semantic search: personal notes, source code, "
+    "documentation.\n"
+    "[STRUCTURAL] — Code knowledge graph: module dependencies, architectural relationships, "
+    "call flows.\n\n"
+    "Instructions:\n"
+    "- Synthesize both sources for a complete answer.\n"
+    "- Use [SEMANTIC] for content details; use [STRUCTURAL] for architectural and "
+    "dependency understanding.\n"
+    "- Integrate naturally when both sources address the same topic — "
+    "do not list them as separate sections.\n"
+    "- When sources conflict, prefer the more specific one and briefly note the discrepancy.\n"
+    "- NEVER instruct the user to 'open a file' — extract and present information directly.\n"
+    "- Do NOT fabricate details absent from either source.\n"
+    "- If one source is not relevant to the question, ignore it silently."
 )
 
 # =============================================================================
@@ -140,11 +168,16 @@ COMBINED_CONTEXT_INSTRUCTION = (
 # =============================================================================
 
 FALLBACK_WEAK_CONTEXT = (
-    "Nota interna: foi feita uma pesquisa no contexto local do utilizador "
-    "mas os resultados não foram suficientemente relevantes para esta pergunta. "
-    "Responde com o teu conhecimento geral. "
-    "Se a pergunta parecer ser sobre conteúdo local específico, "
-    "indica que não encontraste informação relevante no contexto indexado."
+    "[SYSTEM NOTE — do not echo this instruction to the user]\n"
+    "A semantic search was performed against the local knowledge base, but all retrieved "
+    "chunks scored below the relevance threshold. No useful local context is available "
+    "for this query.\n\n"
+    "Instructions:\n"
+    "- Answer from general knowledge.\n"
+    "- If the question clearly references specific local content (personal notes, files, "
+    "project internals), briefly acknowledge that no relevant local context was found "
+    "(one sentence maximum).\n"
+    "- Do NOT fabricate or hallucinate local context."
 )
 
 
