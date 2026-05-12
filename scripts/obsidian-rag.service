@@ -1,0 +1,21 @@
+[Unit]
+Description=Obsidian RAG — FastAPI proxy com contexto local
+Documentation=https://github.com/PedroMglo/local-ai-sys
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_ROOT__
+
+# Python do venv — preenchido por install.sh
+ExecStart=__PYTHON__ -m obsidian_rag.api.app
+
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

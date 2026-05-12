@@ -96,16 +96,42 @@ else
 fi
 
 echo
+
+# --- 7. Systemd user service (Linux only) ---
+echo "─── Serviço Automático ───"
+if [[ "$OSTYPE" == "linux"* ]] && command -v systemctl &>/dev/null; then
+    SERVICE_DIR="$HOME/.config/systemd/user"
+    SERVICE_DEST="$SERVICE_DIR/obsidian-rag.service"
+    PROJECT_ROOT="$(pwd)"
+    PYTHON_BIN="$PROJECT_ROOT/$VENV_DIR/bin/python"
+
+    mkdir -p "$SERVICE_DIR"
+    sed \
+        -e "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" \
+        -e "s|__PYTHON__|$PYTHON_BIN|g" \
+        scripts/obsidian-rag.service > "$SERVICE_DEST"
+
+    systemctl --user daemon-reload
+    systemctl --user enable obsidian-rag 2>/dev/null && \
+        ok "Serviço obsidian-rag activado (inicia automaticamente no login)" || \
+        warn "Não foi possível activar o serviço — activa manualmente: systemctl --user enable obsidian-rag"
+    loginctl enable-linger "$(whoami)" 2>/dev/null || true
+    echo "  → Iniciar agora:  systemctl --user start obsidian-rag"
+    echo "  → Ver logs:       journalctl --user -u obsidian-rag -f"
+else
+    warn "Systemd não detectado — inicia o proxy manualmente com: rag up"
+fi
+
+echo
 echo "═══════════════════════════════════════"
 echo "  Instalação concluída!"
 echo ""
 echo "  Próximos passos:"
 echo "    source .venv/bin/activate"
 echo "    rag init        ← configuração interactiva"
-echo "    rag up           ← verificar e iniciar API"
+echo "    rag sync --all  ← indexar notas e código"
 echo ""
 echo "  Outros comandos:"
 echo "    rag doctor       ← diagnóstico do sistema"
-echo "    rag sync --all   ← sincronizar tudo"
 echo "    rag --help       ← ver todos os comandos"
 echo "═══════════════════════════════════════"
