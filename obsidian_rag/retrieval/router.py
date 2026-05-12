@@ -54,6 +54,12 @@ _LOCAL_SIGNALS = frozenset({
     "configuração", "config", "setup",
     "documentos", "documents", "docs",
     "indexado", "indexed", "local",
+    # Pipeline / project-specific terms (PT + EN)
+    "pipeline", "codebase", "workspace",
+    "modelfile", "modelfiles",
+    "instalado", "instalados", "installed",
+    "configurado", "configurados", "configured",
+    "alias", "aliases", "funções", "functions",
 })
 
 # Signals that the user wants relational/structural info
@@ -75,12 +81,18 @@ _GRAPH_SIGNALS = frozenset({
 
 # Multi-word patterns for graph queries
 _GRAPH_PATTERNS = (
+    # PT
     "como funciona", "como é que", "o que chama", "quem chama",
     "o que depende", "quem depende", "qual o fluxo", "qual é o fluxo",
     "que relação", "como se liga", "como interage",
     "o que acontece se mudar", "impacto de alterar",
+    "este projeto", "este repo", "este módulo", "este pipeline",
+    "o meu pipeline", "o meu repo", "o meu projeto",
+    # EN
     "how does", "what calls", "what depends", "call chain", "call flow",
     "depends on", "used by", "calls to",
+    "this project", "this repo", "this module", "this pipeline",
+    "my pipeline", "my repo", "my project",
 )
 
 
@@ -97,7 +109,7 @@ def _heuristic_route(query: str) -> RoutingDecision:
         return RoutingDecision(
             mode=ContextMode.RAG_AND_GRAPH,
             confidence=0.7,
-            reason="Referência local + sinais de relação/estrutura.",
+            reason="Local reference + structural/relational signals.",
             method="heuristic",
         )
     if has_graph and not has_local:
@@ -109,21 +121,21 @@ def _heuristic_route(query: str) -> RoutingDecision:
             return RoutingDecision(
                 mode=ContextMode.RAG_AND_GRAPH,
                 confidence=0.6,
-                reason="Sinais de relação/estrutura com referência a projeto.",
+                reason="Structural/relational signals with project reference.",
                 method="heuristic",
             )
         # Pure structural words without local context → general question
         return RoutingDecision(
             mode=ContextMode.NO_CONTEXT,
             confidence=0.5,
-            reason="Termos estruturais sem referência explícita a conteúdo local.",
+            reason="Structural terms without explicit local content reference.",
             method="heuristic",
         )
     if has_local:
         return RoutingDecision(
             mode=ContextMode.RAG_ONLY,
             confidence=0.7,
-            reason="Referência explícita a conteúdo local do utilizador.",
+            reason="Explicit reference to user's local content.",
             method="heuristic",
         )
 
@@ -131,7 +143,7 @@ def _heuristic_route(query: str) -> RoutingDecision:
     return RoutingDecision(
         mode=ContextMode.NO_CONTEXT,
         confidence=0.6,
-        reason="Sem referência a conteúdo local — pergunta geral.",
+        reason="No local content references — general question.",
         method="heuristic",
     )
 
@@ -148,18 +160,30 @@ _REASON_PATTERN = re.compile(r"REASON:\s*(.+)", re.IGNORECASE)
 _THINK_PATTERN = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
-def _llm_route(query: str, model: str, base_url: str) -> RoutingDecision | None:
-    """Call LLM to classify the query. Returns None on failure."""
+def _llm_route(query: str, model: str, base_url: str, *, history: list[dict] | None = None) -> RoutingDecision | None:
+    """Call LLM to classify the query. Returns None on failure.
+
+    If history is provided, the last 2 user messages are prepended for
+    follow-up detection so the router can see conversational context.
+    """
     t0 = time.perf_counter()
+
+    # Build messages: system + optional history excerpt + current query
+    messages: list[dict] = [{"role": "system", "content": ROUTER_SYSTEM}]
+    if history:
+        # Include up to 2 recent user messages as context for follow-ups
+        recent_user = [m for m in history if m.get("role") == "user"][-2:]
+        for msg in recent_user:
+            messages.append({"role": "user", "content": ROUTER_USER_TEMPLATE.format(query=msg["content"])})
+            messages.append({"role": "assistant", "content": "(previous turn — classify the NEXT question)"})
+    messages.append({"role": "user", "content": ROUTER_USER_TEMPLATE.format(query=query)})
+
     try:
         resp = httpx.post(
             f"{base_url}/api/chat",
             json={
                 "model": model,
-                "messages": [
-                    {"role": "system", "content": ROUTER_SYSTEM},
-                    {"role": "user", "content": ROUTER_USER_TEMPLATE.format(query=query)},
-                ],
+                "messages": messages,
                 "stream": False,
                 "options": {"temperature": 0.0, "num_predict": 64},
             },
@@ -202,11 +226,16 @@ def _llm_route(query: str, model: str, base_url: str) -> RoutingDecision | None:
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def route_query(query: str, *, context_mode: str | None = None) -> RoutingDecision:
+def route_query(query: str, *, context_mode: str | None = None, history: list[dict] | None = None) -> RoutingDecision:
     """Route a query to the appropriate context strategy.
 
     If context_mode is an explicit mode (not "auto"), returns it directly.
     Otherwise, tries LLM router first, falls back to keyword heuristic.
+
+    Args:
+        query: current user query text.
+        context_mode: explicit mode or "auto".
+        history: previous chat messages for multi-turn follow-up detection.
     """
     mode = context_mode or settings.retrieval.context_mode
 
@@ -221,7 +250,7 @@ def route_query(query: str, *, context_mode: str | None = None) -> RoutingDecisi
         return RoutingDecision(
             mode=explicit_map[mode],
             confidence=1.0,
-            reason=f"Modo explícito: {mode}",
+            reason=f"Explicit mode: {mode}",
             method="explicit",
         )
 
@@ -232,7 +261,7 @@ def route_query(query: str, *, context_mode: str | None = None) -> RoutingDecisi
     if use_llm:
         model = router_cfg.model if router_cfg else "gemma3:4b"
         base_url = settings.ollama.base_url
-        decision = _llm_route(query, model, base_url)
+        decision = _llm_route(query, model, base_url, history=history)
         if decision is not None:
             log.info(
                 "Router LLM: %s (confidence=%.1f, %dms) — %s",

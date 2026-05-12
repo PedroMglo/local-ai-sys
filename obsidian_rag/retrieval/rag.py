@@ -219,20 +219,20 @@ def _passes_relevance_gate(
     policy = settings.context_policy
     all_chunks = notes + code
     if not all_chunks and not graph_str:
-        trace.context_rejected_reason = "Nenhum chunk ou contexto de grafo encontrado."
+        trace.context_rejected_reason = "No chunks or graph context found."
         return False
 
     if all_chunks:
         best_score = max(s for _, _, s in all_chunks)
         if best_score < policy.min_relevance_score:
             trace.context_rejected_reason = (
-                f"Melhor score ({best_score:.2f}) abaixo do mínimo ({policy.min_relevance_score:.2f})."
+                f"Best score ({best_score:.2f}) below minimum ({policy.min_relevance_score:.2f})."
             )
             return False
 
         if len(all_chunks) < policy.min_relevant_chunks:
             trace.context_rejected_reason = (
-                f"Apenas {len(all_chunks)} chunk(s) — mínimo é {policy.min_relevant_chunks}."
+                f"Only {len(all_chunks)} chunk(s) — minimum is {policy.min_relevant_chunks}."
             )
             return False
 
@@ -246,6 +246,7 @@ def build_rag_context(
     *,
     context_mode: str | None = None,
     trace: QueryTrace | None = None,
+    history: list[dict] | None = None,
 ) -> tuple[str, bool, str]:
     """Multi-strategy search with optional graph augmentation.
 
@@ -263,7 +264,7 @@ def build_rag_context(
         trace = QueryTrace(query=query)
 
     # Get routing decision (LLM or heuristic)
-    intent, decision = detect_intent_full(query, mode)
+    intent, decision = detect_intent_full(query, mode, history=history)
     trace.route_mode = decision.mode.value
     trace.route_reason = decision.reason
     trace.route_method = decision.method
@@ -273,7 +274,7 @@ def build_rag_context(
     # NO_CONTEXT: skip all retrieval
     if decision.mode == ContextMode.NO_CONTEXT:
         trace.context_accepted = False
-        trace.context_rejected_reason = "Router: pergunta geral, sem necessidade de contexto local."
+        trace.context_rejected_reason = "Router: general question, no local context needed."
         trace.sources_used = "none"
         trace.log_summary()
         return "", False, "none"
@@ -281,7 +282,7 @@ def build_rag_context(
     # CLARIFY: also skip retrieval, let the LLM ask for clarification
     if decision.mode == ContextMode.CLARIFY:
         trace.context_accepted = False
-        trace.context_rejected_reason = "Router: pergunta ambígua, a pedir esclarecimento."
+        trace.context_rejected_reason = "Router: ambiguous query, requesting clarification."
         trace.sources_used = "none"
         trace.log_summary()
         return "", False, "none"
@@ -469,7 +470,7 @@ def build_rag_context(
 
     # Notes block
     if notes_relevant:
-        lines = ["[CONTEXTO DAS NOTAS PESSOAIS]"]
+        lines = ["[SEMANTIC — PERSONAL NOTES]"]
         for doc, meta, score in notes_relevant:
             display = meta.get("display_text", doc)
             title = meta.get("note_title", "")
@@ -478,7 +479,7 @@ def build_rag_context(
             lines.append(f"{label}  score={score:.2f}")
             lines.append(display)
             lines.append("")
-        lines.append("[/CONTEXTO DAS NOTAS]")
+        lines.append("[/SEMANTIC — PERSONAL NOTES]")
         context_parts.append("\n".join(lines))
 
     # Code block
@@ -489,7 +490,7 @@ def build_rag_context(
             by_repo.setdefault(repo, []).append((doc, meta, score))
 
         for repo_name, repo_chunks in by_repo.items():
-            lines = [f"[CONTEXTO DO CÓDIGO — {repo_name}]"]
+            lines = [f"[SEMANTIC — CODE: {repo_name}]"]
             for doc, meta, score in repo_chunks:
                 display = meta.get("display_text", doc)
                 symbol = meta.get("section_header", "")
@@ -498,7 +499,7 @@ def build_rag_context(
                 lines.append(f"{label}  score={score:.2f}")
                 lines.append(display)
                 lines.append("")
-            lines.append(f"[/CONTEXTO DO CÓDIGO — {repo_name}]")
+            lines.append(f"[/SEMANTIC — CODE: {repo_name}]")
             context_parts.append("\n".join(lines))
 
     # Graph block

@@ -219,7 +219,7 @@ def query_code(req: CodeQueryRequest):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query vazia")
     if not settings.repos.paths:
-        raise HTTPException(status_code=404, detail="Sem repos configurados em rag.toml")
+        raise HTTPException(status_code=404, detail="Sem repos configurados em rag.user.toml")
 
     start = time.time()
     store = _get_store()
@@ -342,10 +342,17 @@ async def chat(request: Request, req: ChatRequest):
             query_text = user_msgs[-1].content
             trace.query = query_text
 
+            # Build history context for multi-turn router awareness
+            prev_messages = [
+                {"role": m.role, "content": m.content}
+                for m in req.messages[:-1]
+            ] or None
+
             context, relevant, sources_used = build_rag_context(
                 query_text,
                 context_mode=req.context_mode,
                 trace=trace,
+                history=prev_messages,
             )
             if relevant:
                 messages = _inject_rag_into_messages(req.messages, context)
@@ -408,7 +415,7 @@ def serve():
         import sys
         print(
             "ERRO: API exposta em 0.0.0.0 sem api_key configurada.\n"
-            "Define [api] api_key em rag.toml ou usa host = \"127.0.0.1\".",
+            "Define [api] api_key em rag.user.toml ou usa host = \"127.0.0.1\".",
             file=sys.stderr,
         )
         sys.exit(1)

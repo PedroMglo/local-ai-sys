@@ -45,8 +45,8 @@ def detect_intent(query: str, context_mode: str) -> QueryIntent:
     return _MODE_TO_INTENT.get(decision.mode, _MODE_TO_INTENT[ContextMode.RAG_ONLY])
 
 
-def detect_intent_full(query: str, context_mode: str) -> tuple[QueryIntent, RoutingDecision]:
+def detect_intent_full(query: str, context_mode: str, *, history: list[dict] | None = None) -> tuple[QueryIntent, RoutingDecision]:
     """Like detect_intent but also returns the full RoutingDecision for observability."""
-    decision = route_query(query, context_mode=context_mode)
+    decision = route_query(query, context_mode=context_mode, history=history)
     intent = _MODE_TO_INTENT.get(decision.mode, _MODE_TO_INTENT[ContextMode.RAG_ONLY])
     return intent, decision
